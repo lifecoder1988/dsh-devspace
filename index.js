@@ -865,6 +865,20 @@ export function apply(ctx, config = {}) {
     },
     /** Call any tool the node publishes (an escape hatch for its own surface). */
     call: (nodeName, tool, args) => callNode(nodeName, tool, args),
+    /**
+     * The mirror a working directory belongs to, when that directory is inside
+     * one — how a consumer narrows a listing to "the node this Session is on".
+     * @param {string} cwd - an absolute working directory.
+     * @returns the mirror record (with the node's label) or null.
+     */
+    mirror: async (cwd) => {
+      if (typeof cwd !== 'string' || cwd.length === 0) return null
+      const { store } = await mirrorState()
+      const mirror = mirrorForCwd(store.mirrors, cwd.replace(/\/+$/, ''))
+      if (mirror === undefined) return null
+      const node = (await readNodes(nodesFile, warn)).find(entry => entry.name === mirror.node)
+      return { ...mirror, label: node?.label ?? '' }
+    },
   }, candidate => candidate !== null && typeof candidate === 'object' && candidate.version === 1)
 
   /** Write the mirror's own AGENTS.md so any Session in it knows the truth. */
