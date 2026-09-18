@@ -55,7 +55,9 @@ async function executeNodeTool(name, args) {
   }
   const cmd = String(args.cmd ?? '')
   const quoted = literals(cmd)
-  const rel = quoted[0] ?? ''
+  // Windows rows now carry `$p = '<path>'`; POSIX rows a plain quoted path.
+  const winPath = /\$p = '((?:[^']|'')*)'/.exec(cmd)?.[1]?.replace(/''/g, "'")
+  const rel = winPath ?? quoted[0] ?? ''
   const file = join(remoteRoot, rel)
   if (cmd.includes('is-a-directory')) {
     if (!existsSync(file)) return { isError: true, content: [{ type: 'text', text: 'no such file' }] }
@@ -79,7 +81,7 @@ async function executeNodeTool(name, args) {
     await writeFile(file, merged)
     return { isError: false, content: [{ type: 'text', text: `${String(merged.length)}\nProcess exited with code 0.` }] }
   }
-  if (cmd.includes('Get-ChildItem -Directory')) {
+  if (cmd.includes('Get-ChildItem -LiteralPath') || cmd.includes('Get-ChildItem -Directory')) {
     return { isError: false, content: [{ type: 'text', text: 'test|0\nProcess exited with code 0.' }] }
   }
   return { isError: false, content: [{ type: 'text', text: 'Process exited with code 0.' }] }

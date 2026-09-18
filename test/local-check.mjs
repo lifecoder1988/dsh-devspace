@@ -32,11 +32,14 @@ let skillProvider = null
 /** The remote `exec_command` the plugin's routes and tools drive, emulated. */
 async function executeNodeTool(name, args) {
   const cmd = String(args.cmd ?? '')
-  const rel = /-(?:Literal)?Path '((?:[^']|'')*)'/.exec(cmd)?.[1]?.replace(/''/g, "'") ?? ''
+  // The plugin addresses its target as `$p = '<path>'` and passes `-LiteralPath $p`.
+  const rel = /\$p = '((?:[^']|'')*)'/.exec(cmd)?.[1]?.replace(/''/g, "'")
+    ?? /-(?:Literal)?Path '((?:[^']|'')*)'/.exec(cmd)?.[1]?.replace(/''/g, "'")
+    ?? ''
   if (name.endsWith('__open_workspace')) {
     return { isError: false, content: [{ type: 'text', text: `Opened workspace ws_emulated01 for ${String(args.path)}.` }] }
   }
-  if (cmd.includes('Get-ChildItem -Directory')) {
+  if (cmd.includes('Get-ChildItem -LiteralPath') || cmd.includes('Get-ChildItem -Directory')) {
     const hidden = new Set(['.git'])
     const body = remoteDirectories.map(entry => `${entry}|${hidden.has(entry) ? '1' : '0'}`).join('\n')
     return { isError: false, content: [{ type: 'text', text: `${body}\nProcess exited with code 0.` }] }

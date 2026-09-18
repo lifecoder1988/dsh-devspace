@@ -615,15 +615,6 @@ export function apply(ctx, config = {}) {
    * A command prefix that moves into a HOME-relative directory, so every listing
    * and read can address `~/.claude/skills` and friends without absolute paths.
    */
-  const homePrefix = (node, rel) => {
-    const win = dialectFor(node) === 'win'
-    if (win) {
-      const target = rel.length === 0 ? '$env:USERPROFILE' : `(Join-Path $env:USERPROFILE ${psQuote(rel.split('/').join('\\'))})`
-      return `Set-Location -LiteralPath ${target} -ErrorAction Stop; `
-    }
-    const target = rel.length === 0 ? '"$HOME"' : `"$HOME"/${shQuote(rel)}`
-    return `cd ${target} || { echo 'devspace:no-such-home-dir' >&2; exit 3; }; `
-  }
 
   /**
    * Refuse to treat a shell failure as data: a spawn error ("spawn … ENOENT")
@@ -739,23 +730,50 @@ export function apply(ctx, config = {}) {
   }
 
   /** List the directories directly under one node-relative path. */
+  /**
+   * The node's own spelling of a path, for a command that addresses it as an
+   * ARGUMENT rather than as the working directory. A non-existent working
+   * directory fails the whole spawn on Windows (`spawn … powershell.exe
+   * ENOENT`, exit -4058), so every listing addresses its target this way and
+   * runs with the node root — which always exists — as its cwd.
+   */
+  const dirExpression = (home, rel, dialect) => {
+    const winRel = rel.split('/').join('\\')
+    if (dialect === 'win') {
+      if (home) return rel.length === 0 ? '$env:USERPROFILE' : `(Join-Path $env:USERPROFILE ${psQuote(winRel)})`
+      return rel.length === 0 ? '(Get-Location).Path' : psQuote(winRel)
+    }
+    if (home) return rel.length === 0 ? '"$HOME"' : `"$HOME"/${shQuote(rel)}`
+    return rel.length === 0 ? '"."' : shQuote(rel)
+  }
+
+  /** The same path as a short label, for messages and result paths. */
+  const dirLabel = (home, rel) => (home ? (rel.length === 0 ? '~' : `~/${rel}`) : rel)
+
   const listRemote = async (input) => {
     const node = await requireNode(input?.node)
     const { home, rel } = resolveNodePath(input?.path)
     const workspaceId = await workspaceIdForRoot(node)
     const win = dialectFor(node) === 'win'
+    const target = dirExpression(home, rel, win ? 'win' : 'posix')
     // Every row carries the Hidden flag so the dialog can decide what to show.
     // Windows rows are `name|hidden` (a pipe cannot appear in a Windows
     // directory name); POSIX rows are `hidden<TAB>name`, because a POSIX name
     // may contain `|` and `ls -1A` alone cannot flag a hidden entry.
     const command = win
       ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-        + 'Get-ChildItem -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name | '
+        + `$p = ${target}; if (-not (Test-Path -LiteralPath $p -PathType Container)) { exit 4 }; Get-ChildItem -LiteralPath $p -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name | `
         + 'ForEach-Object { $h = if (($_.Attributes -band [IO.FileAttributes]::Hidden) -ne 0) { "1" } else { "0" }; "$($_.Name)|$h" }'
-      : 'ls -1A | while IFS= read -r entry; do [ -d "$entry" ] || continue; '
+      : `p=${target}; [ -d "$p" ] || exit 4; ls -1A "$p" | while IFS= read -r entry; do [ -d "$p/$entry" ] || continue; `
         + 'case "$entry" in .*) flag=1;; *) flag=0;; esac; printf \'%s\\t%s\\n\' "$flag" "$entry"; done'
-    const result = await runShell(node, workspaceId, home ? `${homePrefix(node, rel)}${command}` : command, home ? '' : rel)
-    if (result.isError === true) throw new HttpError(502, resultText(result) || '列目录失败')
+    const result = await runShell(node, workspaceId, command, '')
+    if (result.isError === true) {
+      const text = resultText(result)
+      if (/\bexit 4\b|exited with code 4\b|找不到|Cannot find|does not exist/i.test(text)) {
+        throw new HttpError(404, `节点上没有这个目录：${dirLabel(home, rel)}`)
+      }
+      throw new HttpError(502, text || '列目录失败')
+    }
     assertShellOutput(resultText(result))
     const entries = resultText(result).split(/\r?\n/)
       .map(line => line.replace(/\r$/, ''))
@@ -771,7 +789,7 @@ export function apply(ctx, config = {}) {
         return { name, hidden: cut !== -1 && line.slice(cut + 1).trim() === '1' }
       })
       .filter(entry => entry.name.length > 0)
-    const prefix = home ? (rel.length === 0 ? '~' : `~/${rel}`) : rel
+    const prefix = dirLabel(home, rel)
     return {
       node: node.name,
       root: node.root,
@@ -819,14 +837,22 @@ export function apply(ctx, config = {}) {
     const node = await requireNode(nodeName)
     const { home, rel } = resolveNodePath(path)
     const win = dialectFor(node) === 'win'
+    const target = dirExpression(home, rel, win ? 'win' : 'posix')
     const command = win
       ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-        + 'Get-ChildItem -File -Force -ErrorAction SilentlyContinue | Sort-Object Name | '
+        + `$p = ${target}; if (-not (Test-Path -LiteralPath $p -PathType Container)) { exit 4 }; `
+        + 'Get-ChildItem -LiteralPath $p -File -Force -ErrorAction SilentlyContinue | Sort-Object Name | '
         + 'ForEach-Object { $h = if (($_.Attributes -band [IO.FileAttributes]::Hidden) -ne 0) { "1" } else { "0" }; "$($_.Name)|$h|$($_.Length)" }'
-      : 'ls -1A | while IFS= read -r entry; do [ -f "$entry" ] || continue; '
-        + 'case "$entry" in .*) flag=1;; *) flag=0;; esac; printf \'%s\\t%s\\t%s\\n\' "$entry" "$flag" "$(wc -c < "$entry" | tr -d "  ")"; done'
-    const result = await runShell(node, await workspaceIdForRoot(node), home ? `${homePrefix(node, rel)}${command}` : command, home ? '' : rel)
-    if (result.isError === true) throw new HttpError(502, resultText(result) || '列文件失败')
+      : `p=${target}; [ -d \"$p\" ] || exit 4; ls -1A \"$p\" | while IFS= read -r entry; do [ -f \"$p/$entry\" ] || continue; `
+        + 'case "$entry" in .*) flag=1;; *) flag=0;; esac; printf \'%s\\t%s\\t%s\\n\' "$entry" "$flag" "$(wc -c < "$p/$entry" | tr -d "  ")"; done'
+    const result = await runShell(node, await workspaceIdForRoot(node), command, '')
+    if (result.isError === true) {
+      const text = resultText(result)
+      if (/\bexit 4\b|exited with code 4\b|找不到|Cannot find|does not exist/i.test(text)) {
+        throw new HttpError(404, `节点上没有这个目录：${dirLabel(home, rel)}`)
+      }
+      throw new HttpError(502, text || '列文件失败')
+    }
     assertShellOutput(resultText(result))
     const files = resultText(result).split(/\r?\n/)
       .map(line => line.replace(/\r$/, ''))
@@ -842,8 +868,7 @@ export function apply(ctx, config = {}) {
         }
       })
       .filter(entry => entry.name.length > 0)
-    const prefix = home ? (rel.length === 0 ? '~' : `~/${rel}`) : rel
-    return { node: node.name, root: node.root, path: prefix, home, files }
+    return { node: node.name, root: node.root, path: dirLabel(home, rel), home, files }
   }
 
   /**
@@ -885,15 +910,15 @@ export function apply(ctx, config = {}) {
       if (rel.length === 0) throw new HttpError(400, '需要一个文件路径')
       const win = dialectFor(node) === 'win'
       const limit = Math.max(1, Math.floor(Number(maxBytes) || 64 * 1024))
-      const leaf = home ? (rel.split('/').pop() ?? rel) : rel
+      const target = dirExpression(home, rel, win ? 'win' : 'posix')
       const command = win
         ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-          + `$p = ${psQuote(leaf)}; if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { exit 3 }; `
+          + `$p = ${target}; if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { exit 3 }; `
           + `$bytes = [IO.File]::ReadAllBytes((Get-Item -LiteralPath $p).FullName); `
           + `$take = [Math]::Min(${String(limit)}, $bytes.Length); `
           + `[Text.Encoding]::UTF8.GetString($bytes, 0, $take)`
-        : `p=${shQuote(leaf)}; [ -f "$p" ] || exit 3; head -c ${String(limit)} "$p"`
-      const result = await runShell(node, await workspaceIdForRoot(node), home ? `${homePrefix(node, rel.split('/').slice(0, -1).join('/'))}${command}` : command, '')
+        : `p=${target}; [ -f "$p" ] || exit 3; head -c ${String(limit)} "$p"`
+      const result = await runShell(node, await workspaceIdForRoot(node), command, '')
       if (result.isError === true) {
         const text = resultText(result)
         if (/\bexit 3\b|no such file|Cannot find path|找不到路径/i.test(text)) throw new HttpError(404, `远端没有这个文件：${rel}`)
@@ -910,11 +935,11 @@ export function apply(ctx, config = {}) {
       const { home, rel } = resolveNodePath(path)
       if (rel.length === 0) return true
       const win = dialectFor(node) === 'win'
-      const leaf = home ? (rel.split('/').pop() ?? rel) : rel
+      const target = dirExpression(home, rel, win ? 'win' : 'posix')
       const command = win
-        ? `if (Test-Path -LiteralPath ${psQuote(leaf)}) { 'yes' } else { 'no' }`
-        : `[ -e ${shQuote(leaf)} ] && echo yes || echo no`
-      const result = await runShell(node, await workspaceIdForRoot(node), home ? `${homePrefix(node, rel.split('/').slice(0, -1).join('/'))}${command}` : command, '')
+        ? `if (Test-Path -LiteralPath ${target}) { 'yes' } else { 'no' }`
+        : `[ -e ${target} ] && echo yes || echo no`
+      const result = await runShell(node, await workspaceIdForRoot(node), command, '')
       if (result.isError === true) return false
       return /\byes\b/.test(resultText(result))
     },
