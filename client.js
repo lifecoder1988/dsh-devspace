@@ -54,17 +54,20 @@ window.__ModuleLoader__.load({
 .devs-card-main:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
 .devs-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .devs-card-name { min-width: 0; overflow: hidden; font-size: 15px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
-.devs-card-desc { min-height: 20px; font-size: 12px; line-height: 1.55; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+/* Notes are free prose and can be arbitrarily long: three lines keep every card
+   the same height, and the full text stays available through the title tooltip. */
+.devs-card-desc { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 20px; font-size: 12px; line-height: 1.55; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.devs-card-prefix { font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-tertiary); overflow-wrap: anywhere; }
+/* A disabled node stays readable but must not read as live. */
+.devs-card-off .devs-card-main, .devs-card-off .devs-card-foot { opacity: .6; }
 .devs-card-id { margin-top: auto; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-tertiary); overflow-wrap: anywhere; }
 .devs-card-err { font-size: 12px; line-height: 1.5; color: var(--dsw-alias-state-error-primary); overflow-wrap: anywhere; }
 .devs-card-foot { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-top: 0.5px solid var(--dsw-alias-border-l2); }
 .devs-foot-spacer { flex: 1; }
-.devs-add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; align-self: start; min-height: 150px; padding: 16px; box-sizing: border-box; appearance: none; cursor: pointer; font: inherit; text-align: center; color: var(--dsw-alias-label-tertiary); background: transparent; border: 0.5px dashed var(--dsw-alias-border-l2); border-radius: 20px; transition: border-color .16s, background .16s, color .16s; }
-.devs-add:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-interactive-bg-hover); }
-.devs-add:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
-.devs-add-plus { font-size: 22px; line-height: 1; }
-.devs-add-label { font-size: 14px; font-weight: 600; color: currentColor; }
-.devs-add-hint { font-size: 12px; line-height: 1.5; }
+.devs-empty-item { grid-column: 1 / -1; min-width: 0; list-style: none; }
+.devs-empty-plus { font-size: 22px; line-height: 1; }
+.devs-empty-label { font-size: 14px; font-weight: 600; color: currentColor; }
+.devs-empty-hint { font-size: 12px; line-height: 1.5; }
 .devs-mirrors { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .devs-mirror { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; box-sizing: border-box; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 14px; }
 .devs-mirror-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
@@ -76,9 +79,12 @@ window.__ModuleLoader__.load({
 .devs-editor-title { min-width: 0; overflow: hidden; font-size: 15px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .devs-spacer { flex: 1; }
 .devs-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 200px; }
-.devs-field-label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
+/* No text-transform here: these labels name literal identifiers (mcp__<名称>__*,
+   root), and uppercasing them states a prefix the tools do not actually use. */
+.devs-field-label { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-tertiary); }
 .devs-field-hint { font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
 .devs-field-error { font-size: 12px; line-height: 1.5; color: var(--dsw-alias-state-error-primary); }
+.devs-field-warn { font-size: 12px; line-height: 1.5; color: var(--dsw-alias-state-warn-primary); }
 .devs-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .devs-textarea { width: 100%; min-height: 72px; padding: 8px 12px; box-sizing: border-box; resize: vertical; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; line-height: 20px; }
 .devs-textarea:focus-visible { outline: none; border-color: var(--dsw-alias-brand-primary); }
@@ -89,6 +95,26 @@ window.__ModuleLoader__.load({
 .devs-error { margin: 0; font-size: 12px; line-height: 1.55; color: var(--dsw-alias-state-error-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
 .devs-ok { margin: 0; font-size: 12px; line-height: 1.55; color: var(--dsw-alias-state-success-primary); overflow-wrap: anywhere; }
 .devs-loading { font-size: 13px; color: var(--dsw-alias-label-tertiary); }
+/* Collapsed explanation: the page keeps one short lead line, the long version
+   is one click away instead of five lines of prose above the list. */
+.devs-more { font-size: 12px; }
+.devs-more > summary { display: inline-flex; align-items: center; gap: 4px; list-style: none; cursor: pointer; color: var(--dsw-alias-label-tertiary); }
+.devs-more > summary::-webkit-details-marker { display: none; }
+.devs-more > summary:hover { color: var(--dsw-alias-label-primary); }
+.devs-more > summary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 6px; }
+.devs-more-chev { display: inline-flex; transition: transform .16s; }
+.devs-more[open] .devs-more-chev { transform: rotate(90deg); }
+.devs-more-body { margin: 8px 0 0; max-width: 68ch; font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-tertiary); }
+/* Empty state: the add tile is the only cell, so it may take the whole width. */
+.devs-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 132px; padding: 20px 16px; box-sizing: border-box; appearance: none; cursor: pointer; font: inherit; text-align: center; color: var(--dsw-alias-label-tertiary); background: transparent; border: 0.5px dashed var(--dsw-alias-border-l2); border-radius: 20px; transition: border-color .16s, background .16s, color .16s; }
+.devs-empty:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.devs-empty:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+.devs-confirm-text { margin-left: auto; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-state-error-primary); }
+.devs-mirror-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.devs-mirror-path { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 11px; line-height: 17px; }
+.devs-mirror-key { flex: none; color: var(--dsw-alias-label-tertiary); }
+.devs-mirror-val { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); color: var(--dsw-alias-label-secondary); }
+.devs-meta { margin: 0; font-size: 11px; line-height: 17px; color: var(--dsw-alias-label-caption); overflow-wrap: anywhere; }
 `
 
     async function call(path, init) {
@@ -124,6 +150,20 @@ window.__ModuleLoader__.load({
     }
 
     const mapToLines = map => Object.entries(map ?? {}).map(([key, value]) => `${key}=${value}`).join('\n')
+
+    /**
+     * A credential-shaped header value written out in full instead of as a
+     * `${VAR}` reference. The value itself is never echoed back — only a nudge to
+     * move it into the environment.
+     */
+    function hasLiteralCredential(text) {
+      for (const [key, value] of Object.entries(linesToMap(text))) {
+        if (!/(authorization|token|secret|password|api[-_]?key|cookie)/i.test(key)) continue
+        if (value.includes('${')) continue
+        if (value.replace(/^Bearer\s+/i, '').length >= 16) return true
+      }
+      return false
+    }
 
     const STATE_TAG = {
       ready: { tone: 'success', label: '运行中' },
@@ -417,6 +457,7 @@ window.__ModuleLoader__.load({
       const [draft, setDraft] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
       const [notice, setNotice] = React.useState(null)
+      const [confirmDelete, setConfirmDelete] = React.useState(false)
       const [mirrorRoot, setMirrorRoot] = React.useState('')
 
       React.useLayoutEffect(() => {
@@ -460,6 +501,8 @@ window.__ModuleLoader__.load({
 
       const formKey = draft === null ? null : `${draft.mode}:${draft.name}`
       React.useEffect(() => {
+        // A fresh draft never starts armed for deletion.
+        setConfirmDelete(false)
         const field = formRef.current
         if (formKey === null || field === null) return
         field.scrollIntoView({ block: 'nearest' })
@@ -526,6 +569,9 @@ window.__ModuleLoader__.load({
             onChange: event => setDraft(previous => ({ ...previous, headersText: event.target.value })),
           }),
           h('span', { className: 'devs-field-hint' }, 'token 写成 ${VAR} 引用，从进程环境解析；不要写明文。'),
+          hasLiteralCredential(draft.headersText)
+            ? h('span', { className: 'devs-field-warn' }, '这里有一行像明文凭据（值里没有 ${VAR} 引用）：它会明文写进节点文件，建议改成 ${VAR} 引用。')
+            : null,
         ),
         h('div', { className: 'devs-row' },
           field('单次调用超时（毫秒）', 'toolCallTimeoutMs', '120000', null),
@@ -535,6 +581,11 @@ window.__ModuleLoader__.load({
           checked: draft.failOnStartupError,
           label: '节点不可达时报错（关闭则后台自动重连）',
           onChange: next => setDraft(previous => ({ ...previous, failOnStartupError: next })),
+        }),
+        h(Checkbox, {
+          checked: draft.enabled,
+          label: '启用该节点（关闭后它的 mcp__ 工具立即卸载）',
+          onChange: next => setDraft(previous => ({ ...previous, enabled: next })),
         }),
         h('div', { className: 'devs-actions' },
           h(Button, {
@@ -550,17 +601,30 @@ window.__ModuleLoader__.load({
                   notes: draft.notes,
                   toolCallTimeoutMs: Number(draft.toolCallTimeoutMs) || 120000,
                   failOnStartupError: draft.failOnStartupError,
-                  enabled: true,
+                  enabled: draft.enabled,
                 },
               }, draft.mode === 'create' ? `已添加节点 ${draft.name}` : `已保存节点 ${draft.name}`).then(result => { if (result !== null) setDraft(null) })
             },
           }, draft.mode === 'create' ? '添加并挂载' : '保存'),
           h('span', { className: 'devs-spacer' }),
-          draft.mode === 'edit'
+          draft.mode !== 'edit'
+            ? null
+            : confirmDelete
+              // Deleting a node unmounts its tools and is not undoable: arm the
+              // intent first, and say what the click will actually do.
+              ? h('span', { className: 'devs-confirm-text' }, '删除后它的 mcp__ 工具立即卸载，且不可撤销。')
+              : h(Button, {
+                  size: 'sm', variant: 'ghost', className: 'devs-danger', disabled: busy,
+                  onClick: () => setConfirmDelete(true),
+                }, '删除节点'),
+          confirmDelete && draft.mode === 'edit'
             ? h(Button, {
                 size: 'sm', variant: 'ghost', className: 'devs-danger', disabled: busy,
                 onClick: () => { void act('/delete', { name: draft.name }, `已删除节点 ${draft.name}`).then(result => { if (result !== null) setDraft(null) }) },
-              }, '删除节点')
+              }, '确认删除')
+            : null,
+          confirmDelete && draft.mode === 'edit'
+            ? h(Button, { size: 'sm', variant: 'ghost', disabled: busy, onClick: () => setConfirmDelete(false) }, '取消删除')
             : null,
         ),
       )
@@ -569,23 +633,34 @@ window.__ModuleLoader__.load({
         const active = draft !== null && draft.mode === 'edit' && draft.name === node.name
         if (active) return h('li', { key: node.name, className: 'devs-form-item', ref: formRef }, renderForm())
         const tag = STATE_TAG[node.state] ?? { tone: 'info', label: String(node.state) }
+        const broken = node.state === 'error' || node.state === 'conflict'
+        const title = node.label.length > 0 ? node.label : node.name
+        const openEditor = () => { setNotice(null); setDraft(draftOf(node)) }
         return h('li', {
           key: node.name,
-          className: `devs-card${node.state === 'error' || node.state === 'conflict' ? ' devs-card-broken' : ''}`,
+          className: `devs-card${broken ? ' devs-card-broken' : ''}${node.enabled !== true ? ' devs-card-off' : ''}`,
         },
-        h('button', { type: 'button', className: 'devs-card-main', onClick: () => { setNotice(null); setDraft(draftOf(node)) } },
+        h('button', {
+          type: 'button',
+          className: 'devs-card-main',
+          'aria-label': `编辑节点 ${node.name}`,
+          onClick: openEditor,
+        },
           h('span', { className: 'devs-card-head' },
-            h('span', { className: 'devs-card-name' }, node.label.length > 0 ? node.label : node.name),
+            h('span', { className: 'devs-card-name', title }, title),
             h(Tag, { tone: tag.tone }, node.state === 'ready' ? `运行中 · ${String(node.toolCount)} 工具` : tag.label),
             node.fromComposition ? h(Tag, { tone: 'warning' }, 'composition') : null,
           ),
-          h('span', { className: 'devs-card-desc' }, node.notes.length > 0 ? node.notes : `工具前缀 mcp__${node.name}__*`),
-          h('span', { className: 'devs-card-id' }, node.url),
+          // The prefix is what the tools are actually called: always visible, so
+          // a label never hides the name the model has to use.
+          h('span', { className: 'devs-card-prefix' }, `mcp__${node.name}__*`),
+          node.notes.length > 0 ? h('span', { className: 'devs-card-desc', title: node.notes }, node.notes) : null,
           node.error !== null && node.error !== undefined ? h('span', { className: 'devs-card-err' }, node.error) : null,
+          h('span', { className: 'devs-card-id' }, node.url),
         ),
         h('div', { className: 'devs-card-foot' },
-          h(Button, { size: 'sm', variant: 'ghost', onClick: () => { setNotice(null); setDraft(draftOf(node)) } }, '编辑'),
-          node.state === 'error' || node.state === 'conflict'
+          h(Button, { size: 'sm', variant: 'ghost', onClick: openEditor }, '编辑'),
+          broken
             ? h(Button, { size: 'sm', variant: 'ghost', disabled: busy, onClick: () => { void act('/retry', {}, `已重试 ${node.name}`) } }, '重试')
             : null,
           h('span', { className: 'devs-foot-spacer' }),
@@ -595,30 +670,50 @@ window.__ModuleLoader__.load({
           }, node.enabled !== true ? '启用' : '停用'),
         ))
       })
-      cells.push(draft !== null && draft.mode === 'create'
-        ? h('li', { key: '__create', className: 'devs-form-item', ref: formRef }, renderForm())
-        : h('li', { key: '__add' },
-            h('button', { type: 'button', className: 'devs-add', onClick: () => { setNotice(null); setDraft(emptyDraft()) } },
-              h('span', { className: 'devs-add-plus' }, '＋'),
-              h('span', { className: 'devs-add-label' }, nodes.length === 0 ? '添加第一个节点' : '添加节点'),
-              h('span', { className: 'devs-add-hint' }, '保存即挂载，无需重启'),
-            )))
+      // With nodes on screen the toolbar owns "add"; the dashed tile is the empty
+      // state's only cell. Either way the create editor opens inside the grid.
+      if (draft !== null && draft.mode === 'create') {
+        cells.push(h('li', { key: '__create', className: 'devs-form-item', ref: formRef }, renderForm()))
+      } else if (nodes.length === 0) {
+        cells.push(h('li', { key: '__empty', className: 'devs-empty-item' },
+          h('button', { type: 'button', className: 'devs-empty', onClick: () => { setNotice(null); setDraft(emptyDraft()) } },
+            h('span', { className: 'devs-empty-plus' }, '＋'),
+            h('span', { className: 'devs-empty-label' }, '添加第一个节点'),
+            h('span', { className: 'devs-empty-hint' }, '一个节点 = 一个 MCP 端点；保存即挂载，无需重启'),
+          )))
+      }
+
+      const skillLine = data === null
+        ? ''
+        : `技能 ${data.skill.active ? `${data.skill.name} 已注入` : '未注入（没有启用中的节点）'}`
 
       return h('div', { className: 'devs-page', ref: rootRef },
         h('style', null, CSS),
         h('h2', { className: 'devs-title' }, 'DevSpace 节点'),
-        h('p', { className: 'devs-intro' }, '这里统一管理 DevSpace 节点：一个节点就是一个 MCP 端点，添加后即时挂载，工具以 mcp__<节点名>__<工具> 出现。从工作区选择器的「Add Remote…」选一个远端目录，会在本地建一个镜像工作区（下面的列表），会话就挂在那个本地工作区下；项目本体仍在远端，远端读写只走 mcp__ 工具，两边靠 devspace_pull / devspace_push 传文件，不会自动同步。'),
-        h('div', { className: 'devs-toolbar' },
-          h(Button, { size: 'sm', variant: 'outline', disabled: busy, onClick: () => { void load() } }, '刷新'),
-          h(Button, { size: 'sm', variant: 'primary', disabled: busy || data === null, onClick: () => { setNotice(null); setDraft(emptyDraft()) } }, '添加节点'),
+        h('p', { className: 'devs-intro' }, '统一管理 DevSpace 节点：一个节点就是一个 MCP 端点，添加后即时挂载，工具以 mcp__<节点名>__<工具> 出现。'),
+        h('details', { className: 'devs-more' },
+          h('summary', null,
+            h('span', { className: 'devs-more-chev' }, iconNode(IconChevronRightOutline14, { size: 12 })),
+            '它是怎么工作的',
+          ),
+          h('p', { className: 'devs-more-body' }, '从工作区选择器的「Add Remote…」选一个远端目录，会在本地建一个镜像工作区（下面的列表），会话就挂在那个本地工作区下；项目本体仍在远端，远端读写只走 mcp__ 工具，两边靠 devspace_pull / devspace_push 传文件，不会自动同步。'),
         ),
-        state.error !== null ? h('p', { className: 'devs-error' }, state.error) : null,
-        notice !== null ? h('p', { className: notice.kind === 'ok' ? 'devs-ok' : 'devs-error' }, notice.text) : null,
-        data !== null
-          ? h('p', { className: 'devs-mono' }, `${data.nodesFile}　·　技能 ${data.skill.active ? `${data.skill.name} 已注入` : '未注入（没有启用中的节点）'}`)
+        h('div', { className: 'devs-toolbar' },
+          h(Button, { size: 'sm', variant: 'outline', disabled: busy, onClick: () => { void load() } }, busy ? '刷新中…' : '刷新'),
+          h(Button, {
+            size: 'sm', variant: 'primary',
+            // Never re-open the draft from here: it would silently drop what is typed.
+            disabled: busy || data === null || draft !== null,
+            title: draft === null ? undefined : '先保存或取消当前编辑',
+            onClick: () => { setNotice(null); setDraft(emptyDraft()) },
+          }, '添加节点'),
+        ),
+        state.error !== null ? h('p', { className: 'devs-error', role: 'alert' }, state.error) : null,
+        notice !== null
+          ? h('p', { className: notice.kind === 'ok' ? 'devs-ok' : 'devs-error', role: notice.kind === 'ok' ? 'status' : 'alert' }, notice.text)
           : null,
         data !== null && data.unresolved.length > 0
-          ? h('p', { className: 'devs-error' }, `有 ${String(data.unresolved.length)} 个 ${'${VAR}'} 引用没解析到：${data.unresolved.join(', ')}`)
+          ? h('p', { className: 'devs-error', role: 'alert' }, `有 ${String(data.unresolved.length)} 个 ${'${VAR}'} 引用没解析到：${data.unresolved.join(', ')}`)
           : null,
         h('div', { className: 'devs-group' },
           h('h3', { className: 'devs-group-head' }, `节点 · ${String(nodes.length)}`),
@@ -650,18 +745,33 @@ window.__ModuleLoader__.load({
                 : h('ul', { className: 'devs-mirrors' }, (data.mirrors ?? []).map(mirror => h('li', { key: mirror.workspaceId, className: 'devs-mirror' },
                     h('div', { className: 'devs-mirror-main' },
                       h('span', { className: 'devs-mirror-title' }, mirror.title),
-                      h('span', { className: 'devs-card-id' }, `${mirror.node} · ${mirror.remotePath}${mirror.remoteWorkspaceId.length > 0 ? ` · ${mirror.remoteWorkspaceId}` : ''}`),
-                      h('span', { className: 'devs-card-id' }, `本地 ${mirror.localPath}${mirror.exists === false ? '（目录已不存在）' : ''}`),
+                      h('span', { className: 'devs-mirror-tags' },
+                        h(Tag, { tone: 'outline' }, mirror.node),
+                        mirror.exists === false ? h(Tag, { tone: 'warning' }, '本地目录已不存在') : null,
+                      ),
+                      h('span', { className: 'devs-mirror-path' },
+                        h('span', { className: 'devs-mirror-key' }, '远端'),
+                        h('span', {
+                          className: 'devs-mirror-val',
+                          title: `${mirror.remotePath}${mirror.remoteWorkspaceId.length > 0 ? ` · ${mirror.remoteWorkspaceId}` : ''}`,
+                        }, `${mirror.remotePath}${mirror.remoteWorkspaceId.length > 0 ? ` · ${mirror.remoteWorkspaceId}` : ''}`),
+                      ),
+                      h('span', { className: 'devs-mirror-path' },
+                        h('span', { className: 'devs-mirror-key' }, '本地'),
+                        h('span', { className: 'devs-mirror-val', title: mirror.localPath }, mirror.localPath),
+                      ),
                     ),
                     h(Button, {
                       size: 'sm',
                       variant: 'ghost',
                       disabled: busy,
+                      title: '只移除侧栏登记，本地目录保留',
                       onClick: () => { void act('/unmirror', { workspaceId: mirror.workspaceId }, '已从侧栏移除该工作区登记（本地目录保留）') },
                     }, '移除'),
                   ))),
             )
           : null,
+        data !== null ? h('p', { className: 'devs-meta' }, `${data.nodesFile} · ${skillLine}`) : null,
         h('p', { className: 'devs-note' }, '一个 node = 一个 MCP 服务器。要多台机器就多加几条；同一台机器上的多个 project/worktree 在远端用各自的 workspace_id 区分（不同节点之间不通用）。'),
       )
     }
@@ -690,7 +800,8 @@ window.__ModuleLoader__.load({
      * Metrics and tokens copy the shipped `Select Workspace Directory` dialog
      * (ui-directory-picker-browse) so the remote picker reads as the same
      * product surface: 680x500 card, header with title + path breadcrumb, one
-     * folder column, footer with New folder / Show hidden files / Cancel / Open.
+     * folder column, footer with 新建文件夹 / 显示隐藏项 / 取消 / 打开. Labels are
+     * Chinese because every other surface this plugin owns is Chinese.
      * The card classes are doubled so they win over the Modal's own module class
      * regardless of stylesheet order.
      */
@@ -722,9 +833,17 @@ window.__ModuleLoader__.load({
 .devs-dlg-rowIcon { flex: none; color: var(--dsw-alias-label-secondary); }
 .devs-dlg-rowName { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--dsw-alias-label-primary); }
 .devs-dlg-rowChev { flex: none; color: var(--dsw-alias-label-tertiary); }
-.devs-dlg-status, .devs-dlg-error { padding: 4px; padding-right: 120px; font-size: 12px; line-height: 18px; }
-.devs-dlg-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); }
-.devs-dlg-error { color: var(--dsw-alias-state-error-primary); overflow-wrap: anywhere; }
+.devs-dlg-empty { display: flex; flex-direction: column; gap: 4px; padding: 4px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
+.devs-dlg-empty-hint { color: var(--dsw-alias-label-tertiary); }
+/* Where this level actually is: pinned above the footer, out of the scrolling
+   list, so it reads as a fact about the pick, not as list content. */
+.devs-dlg-info { display: flex; flex-direction: column; gap: 2px; flex: none; padding: 8px 24px 0; }
+.devs-dlg-infoRow { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; line-height: 18px; }
+.devs-dlg-infoKey { flex: none; width: 56px; color: var(--dsw-alias-label-tertiary); }
+.devs-dlg-infoVal { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); color: var(--dsw-alias-label-secondary); }
+.devs-dlg-infoHint { flex: none; color: var(--dsw-alias-label-caption); }
+.devs-dlg-alert { flex: none; padding: 8px 24px 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary); overflow-wrap: anywhere; }
+.devs-dlg-error { padding: 4px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary); overflow-wrap: anywhere; }
 .devs-dlg-float { position: absolute; right: 16px; bottom: 8px; padding: 2px 8px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
 .devs-dlg-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: none; padding: 16px 24px; border-top: 0.5px solid var(--dsw-alias-border-l3); }
 .devs-dlg-toggle { display: inline-flex; align-items: center; gap: 4px; border: none; background: transparent; padding: 0; font-family: inherit; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--dsw-alias-label-secondary); cursor: pointer; white-space: nowrap; }
@@ -820,7 +939,7 @@ window.__ModuleLoader__.load({
             const first = enabled.length > 0 ? enabled[0].name : ''
             setNode(first)
             if (first === '') {
-              setError('No enabled DevSpace node yet — add one under Settings → DevSpace 节点.')
+              setError('还没有启用中的 DevSpace 节点：先到「设置 → DevSpace 节点」添加一个。')
               return
             }
             const answer = await post('/ls', { node: first, path: '' })
@@ -903,23 +1022,23 @@ window.__ModuleLoader__.load({
           if (createOpen) { if (!creating) setCreateOpen(false); return }
           if (!busy && !opening) props.onClose()
         },
-        title: 'Select Remote Directory',
+        title: '选择远端目录',
         className: 'devs-dlg',
         headless: true,
       },
         h('style', null, FLOW_CSS),
         h('div', { className: 'devs-dlg-header', 'data-devs-dialog': 'header' },
           h('div', { className: 'devs-dlg-titleRow' },
-            h('h2', { className: 'devs-dlg-title' }, 'Select Remote Directory'),
+            h('h2', { className: 'devs-dlg-title' }, '选择远端目录'),
             // Always present: it names the node being browsed, and it is the
             // switch between nodes when more than one is mounted.
             h('span', { className: 'devs-dlg-nodeSeat' },
-              h('span', { className: 'devs-dlg-nodeLabel' }, 'Node'),
+              h('span', { className: 'devs-dlg-nodeLabel' }, '节点'),
               h('select', {
                 className: 'devs-dlg-node',
                 value: node,
-                disabled: nodes.length === 0,
-                'aria-label': 'DevSpace node',
+                disabled: nodes.length === 0 || busy,
+                'aria-label': 'DevSpace 节点',
                 'data-devs-node': node,
                 onChange: event => {
                   const next = event.target.value
@@ -956,7 +1075,7 @@ window.__ModuleLoader__.load({
                   className: 'devs-dlg-path',
                   autoFocus: true,
                   value: draft,
-                  'aria-label': 'Remote path',
+                  'aria-label': '远端路径',
                   onChange: event => setDraft(event.target.value),
                   ...compositionGuard,
                   onKeyDown: event => {
@@ -968,7 +1087,7 @@ window.__ModuleLoader__.load({
               : h('button', {
                   type: 'button',
                   className: 'devs-dlg-edit',
-                  'aria-label': 'Edit path',
+                  'aria-label': '编辑路径',
                   disabled: listing === null,
                   onClick: () => { setDraft(listing === null ? '' : listing.path); setEditing(true) },
                 }, iconNode(IconEditOutline16, { size: 14 })),
@@ -977,9 +1096,12 @@ window.__ModuleLoader__.load({
         h('div', { className: 'devs-dlg-content' },
           h('div', { className: 'devs-dlg-column', 'data-devs-column': 'level' },
             listing === null
-              ? null
+              ? h('div', { className: 'devs-dlg-empty', role: 'status' }, busy ? '正在读取远端目录…' : '还没有读到目录。')
               : visible.length === 0
-                ? h('div', { className: 'devs-dlg-status' }, busy ? 'Loading…' : 'No sub-directories here.')
+                ? h('div', { className: 'devs-dlg-empty' },
+                    h('span', null, '这个目录下没有子目录。'),
+                    h('span', { className: 'devs-dlg-empty-hint' }, '可以直接点「打开」选中当前目录。'),
+                  )
                 : visible.map(entry => h('button', {
                     key: entry.path,
                     type: 'button',
@@ -992,33 +1114,42 @@ window.__ModuleLoader__.load({
                     iconNode(IconChevronRightOutline14, { size: 12, className: 'devs-dlg-rowChev' }),
                   )),
           ),
-          listing === null
-            ? null
-            : h('div', { className: 'devs-dlg-status', title: hostPath }, `远端 ${hostPath}`),
-          listing === null || localPath === ''
-            ? null
-            : h('div', { className: 'devs-dlg-status', title: localPath }, `本地镜像 ${localPath}（Open 会建这个工作区）`),
-          busy && listing === null
-            ? h('div', { className: 'devs-dlg-float', role: 'status' }, 'Loading…')
-            : null,
-          error !== null && !createOpen
-            ? h('div', { className: 'devs-dlg-error', role: 'alert' }, error)
+          busy && listing !== null
+            ? h('div', { className: 'devs-dlg-float', role: 'status' }, '读取中…')
             : null,
         ),
+        listing === null
+          ? null
+          : h('div', { className: 'devs-dlg-info' },
+              h('div', { className: 'devs-dlg-infoRow' },
+                h('span', { className: 'devs-dlg-infoKey' }, '远端'),
+                h('span', { className: 'devs-dlg-infoVal', title: hostPath }, hostPath),
+              ),
+              localPath === ''
+                ? null
+                : h('div', { className: 'devs-dlg-infoRow' },
+                    h('span', { className: 'devs-dlg-infoKey' }, '本地镜像'),
+                    h('span', { className: 'devs-dlg-infoVal', title: localPath }, localPath),
+                    h('span', { className: 'devs-dlg-infoHint' }, '打开时建为镜像工作区'),
+                  ),
+            ),
+        error !== null && !createOpen
+          ? h('div', { className: 'devs-dlg-alert', role: 'alert' }, error)
+          : null,
         h('div', { className: 'devs-dlg-foot' },
           h(Button, {
             variant: 'outline',
             icon: iconNode(IconPlusOutline16, { size: 14 }),
             disabled: listing === null || busy,
             onClick: () => { setCreateName(''); setCreateOpen(true) },
-          }, 'New folder'),
+          }, '新建文件夹'),
           h('button', {
             type: 'button',
             className: `devs-dlg-toggle${showHidden ? ' devs-dlg-toggle-on' : ''}`,
             'aria-pressed': showHidden,
             onClick: () => setShowHidden(value => !value),
           },
-            'Show hidden files',
+            '显示隐藏项',
             showHidden ? iconNode(IconCheckOutline16, { size: 14 }) : null,
           ),
           h('span', { className: 'devs-dlg-gap' }),
@@ -1027,31 +1158,31 @@ window.__ModuleLoader__.load({
             className: 'devs-dlg-action',
             disabled: opening,
             onClick: () => props.onClose(),
-          }, 'Cancel'),
+          }, '取消'),
           h(Button, {
             variant: 'primary',
             className: 'devs-dlg-action',
             disabled: listing === null || busy || opening,
             onClick: () => { void pick() },
-          }, opening ? 'Opening…' : 'Open'),
+          }, opening ? '打开中…' : '打开'),
         ),
         h(Modal, {
           open: createOpen,
           onClose: () => { if (!creating) setCreateOpen(false) },
-          title: 'New folder',
+          title: '新建文件夹',
           className: 'devs-dlg-create',
           headless: true,
         },
           h('div', { className: 'devs-dlg-createBody' },
-            h('h3', { className: 'devs-dlg-createTitle' }, 'New folder'),
-            h('p', { className: 'devs-dlg-createIn' }, `New folder in "${levelName}"`),
+            h('h3', { className: 'devs-dlg-createTitle' }, '新建文件夹'),
+            h('p', { className: 'devs-dlg-createIn' }, `在“${levelName}”下新建文件夹`),
             h('input', {
               className: 'devs-dlg-createInput',
               autoFocus: true,
               disabled: creating,
               value: createName,
-              placeholder: 'Untitled folder',
-              'aria-label': 'Folder name',
+              placeholder: '未命名文件夹',
+              'aria-label': '文件夹名称',
               onChange: event => setCreateName(event.target.value),
               ...compositionGuard,
               onKeyDown: event => {
@@ -1061,12 +1192,12 @@ window.__ModuleLoader__.load({
             }),
             error !== null ? h('div', { className: 'devs-dlg-error', role: 'alert' }, error) : null,
             h('div', { className: 'devs-dlg-createActions' },
-              h(Button, { variant: 'outline', disabled: creating, onClick: () => setCreateOpen(false) }, 'Cancel'),
+              h(Button, { variant: 'outline', disabled: creating, onClick: () => setCreateOpen(false) }, '取消'),
               h(Button, {
                 variant: 'primary',
                 disabled: creating || createName.trim() === '',
                 onClick: () => { void createFolder() },
-              }, creating ? 'Creating…' : 'Create'),
+              }, creating ? '创建中…' : '创建'),
             ),
           ),
         ),
