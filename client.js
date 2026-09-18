@@ -945,10 +945,11 @@ window.__ModuleLoader__.load({
         }, RemoteDialogHost))
 
         // Read-only self-check over the harness's own Cordis Inspect channel.
-        const inspect = ctx.get('cordisInspect')
-        if (inspect !== undefined) {
+        // Reactive injection, not a one-shot `ctx.get`: a plugin's apply may run
+        // before the inspect service exists.
+        ctx.inject(['cordisInspect'], (inspectCtx) => {
           try {
-            ctx.effect(() => inspect.register({
+            ctx.effect(() => inspectCtx.cordisInspect.register({
               manifest: {
                 id: 'DevSpacePage',
                 description: 'Live geometry and content facts of the DevSpace node page.',
@@ -990,7 +991,7 @@ window.__ModuleLoader__.load({
           } catch (error) {
             console.warn('[devspace] inspect provider registration failed:', error)
           }
-        }
+        })
       },
     }
   },

@@ -118,6 +118,8 @@ node test/local-check.mjs    # host 面：节点存储、挂载状态、路由
 node test/mirror-check.mjs   # 镜像流程 + 双向传输（内置一个假的远端节点，20 项断言）
 ```
 
+两个自检脚本都通过 `ctx.inject(['cordisInspect'], …)` 注册只读探针（`DevSpacePage` / 以及另外三个插件各自的页面探针），所以"插件没数据"这类问题可以直接从连着的页面里读事实，而不是靠猜。
+
 `mirror-check.mjs` 不联网、不碰真机：它在临时目录里模拟节点（识别 PowerShell 脚本形状），跑完 `open` → 目录列表 → `devspace_target` → 400 KB 上传 → 400 KB 下载 → 哈希比对 → `unmirror`，并断言每条远端命令行都短于 Windows 的 32 KB 上限。
 
 ## 文件结构

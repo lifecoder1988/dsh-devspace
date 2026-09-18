@@ -121,6 +121,9 @@ function normalizeNode(input) {
     label: typeof input.label === 'string' ? input.label.trim() : '',
     // The node's allowed root: browsing and `open_workspace` start here.
     root: typeof input.root === 'string' ? input.root.trim() : '',
+    // Optional shell dialect override ('win' | 'posix'); when empty the node's
+    // own shell tool decides (see nodeDialect).
+    platform: typeof input.platform === 'string' ? input.platform.trim() : '',
     url,
     headers,
     notes: typeof input.notes === 'string' ? input.notes.trim() : '',
@@ -182,13 +185,39 @@ function psQuote(value) {
   return `'${String(value).replace(/'/g, "''")}'`
 }
 
+/** Single-quote one POSIX shell argument (an embedded quote becomes `'\''`). */
+function shQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`
+}
+
+/**
+ * The shell dialect a node speaks, which decides both the script wording and
+ * the path spelling. Codex-style nodes publish `exec_command` (the PowerShell
+ * wording this plugin has always used); claude-style nodes publish `bash` and
+ * get POSIX wording. An operator can force either with the node's `platform`.
+ * @param {any} node - the stored node record.
+ * @param {string|null} shellTool - the shell tool the node publishes.
+ * @returns {'win'|'posix'} the dialect.
+ */
+function nodeDialect(node, shellTool) {
+  const forced = String(node?.platform ?? '').trim().toLowerCase()
+  if (['win', 'windows', 'powershell'].includes(forced)) return 'win'
+  if (['posix', 'unix', 'linux', 'darwin', 'macos'].includes(forced)) return 'posix'
+  return shellTool === 'bash' ? 'posix' : 'win'
+}
+
 /** Remote path spelling with forward slashes and no trailing separator. */
 function normalizeRemotePath(value) {
   return String(value ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
 }
 
-/** The skill body: the node list plus the rules that are easy to get wrong. */
-function renderSkill(nodes) {
+/**
+ * The skill body: the node list (with the tools each node actually publishes)
+ * plus the rules that are easy to get wrong.
+ * @param {any[]} nodes - enabled node records.
+ * @param {(name: string) => string[]} [toolsOf] - plain tool names per node.
+ */
+function renderSkill(nodes, toolsOf) {
   const lines = [
     '# DevSpace 远端节点',
     '',
@@ -200,6 +229,12 @@ function renderSkill(nodes) {
   for (const node of nodes) {
     const parts = [node.label.length > 0 ? node.label : node.name, node.url, `工具前缀 \`mcp__${node.name}__*\``]
     lines.push(`- \`${node.name}\` — ${parts.join(' · ')}`)
+    const tools = typeof toolsOf === 'function' ? toolsOf(node.name) : []
+    if (tools.length > 0) {
+      const shell = tools.includes('bash') && !tools.includes('exec_command') ? 'bash' : 'exec_command'
+      const dialect = nodeDialect(node, shell)
+      lines.push(`  - 该节点暴露的工具：${tools.map(name => `\`${name}\``).join(' / ')} · shell：${dialect === 'win' ? 'PowerShell（Windows 路径）' : 'POSIX（类 Unix 路径）'}`)
+    }
     if (node.notes.length > 0) lines.push(`  - 备注：${node.notes}`)
   }
   lines.push(
@@ -209,11 +244,11 @@ function renderSkill(nodes) {
     '0. 开工前先调一次 `devspace_target`：它按本会话的 cwd 报出远端目标（节点 + 远端目录 + 远端 workspace_id + 本地镜像目录）。有目标就直接复用那个 workspace_id，不要再 `open_workspace`。',
     '1. 没有目标时：一个远端目录调一次 `open_workspace { path }`，拿到 `workspace_id` 之后在所有后续调用里复用；**不同节点的 workspace_id 不通用**。',
     '2. `open_workspace` 的返回里会列出该目录的 `AGENTS.md` / `CLAUDE.md` 与可用技能 —— 先读它们再动手。',
-    '3. 改远端代码用 `apply_patch`（路径相对 workspace 根），临时命令用 `exec_command`（远端是 **PowerShell**：`Get-ChildItem` / `Select-String` / `$env:NAME`），长任务用 `write_stdin`。',
+    '3. 改远端代码用**该节点暴露的**编辑工具（`apply_patch`，或 `write` / `edit`），跑命令用它暴露的 shell 工具（`exec_command`，或 `bash`），支持时再用 `write_stdin` 接长任务。**先看上面「节点」一节列出的工具名，别用该节点没有的工具。**',
     '4. 传文件用 `devspace_pull`（远端 → 本地镜像）与 `devspace_push`（本地 → 远端）：二进制安全、按块传输。别手工 base64 搬运，也别假设两边已同步。',
     '5. 本地镜像目录里的文件可以直接用本地工具读写（下载的数据、本地分析脚本都在这里）。',
-    '6. 一轮改动结束、给出最终答复前调一次 `show_changes`，让用户看到远端合并 diff。',
-    '7. 路径一律写远端形式（如 `D:\\ai\\项目\\src\\x.ts`）；远端命令的退出码在输出末尾（`Process exited with code N`）。',
+    '6. 有 `show_changes` 的节点，一轮改动结束、给出最终答复前调一次，让用户看到远端合并 diff。',
+    '7. 路径一律写远端形式，并照该节点的平台写：Windows 节点如 `D:\\ai\\项目\\src\\x.ts`，macOS/Linux 节点如 `/Users/joe/code/proj/src/x.ts`；`exec_command` 的退出码在输出末尾（`Process exited with code N`）。',
     '',
   )
   return lines.join('\n')
@@ -502,13 +537,66 @@ export function apply(ctx, config = {}) {
   const workspaceIdForRoot = async (node) => {
     const cached = rootWorkspaces.get(node.name)
     if (cached !== undefined && cached.root === node.root) return cached.workspaceId
-    if (node.root.length === 0) throw new HttpError(409, `节点 "${node.name}" 还没填允许根目录（root），无法浏览远端目录`)
-    const result = await callNode(node.name, 'open_workspace', { path: node.root })
+    const root = String(node.root ?? '')
+    if (root.length === 0) throw new HttpError(409, `节点 "${node.name}" 还没填允许根目录（root），无法浏览远端目录`)
+    const result = await callNode(node.name, 'open_workspace', { path: root })
     const text = resultText(result)
     const match = /\b(ws_[A-Za-z0-9_-]{4,})\b/.exec(text)
     if (match === null) throw new HttpError(502, `open_workspace 没有返回 workspace_id：${text.slice(0, 300)}`)
     rootWorkspaces.set(node.name, { root: node.root, workspaceId: match[1] })
     return match[1]
+  }
+
+  /** The plain (prefix-free) tool names one node currently publishes, sorted. */
+  const toolNamesFor = (nodeName) => {
+    const prefix = `mcp__${nodeName}__`
+    return toolsFor(nodeName)
+      .map(name => (name.startsWith(prefix) ? name.slice(prefix.length) : name))
+      .sort()
+  }
+
+  /**
+   * The shell tool a node publishes: `exec_command` (codex-style, the wording
+   * this plugin has always driven) when present, else `bash` (claude-style),
+   * else `exec_command` so a node whose tools have not synced yet behaves
+   * exactly as it did before.
+   */
+  const shellToolFor = (nodeName) => {
+    const names = toolNamesFor(nodeName)
+    if (names.includes('exec_command')) return 'exec_command'
+    if (names.includes('bash')) return 'bash'
+    return 'exec_command'
+  }
+
+  /** The dialect (`win` | `posix`) one node's shell and paths use. */
+  const dialectFor = (node) => nodeDialect(node, shellToolFor(node.name))
+
+  /**
+   * Run one shell command inside a node workspace through whichever shell tool
+   * that node publishes. `command` is written in the node's own dialect by the
+   * caller; this only picks the tool and its argument names.
+   * @param {any} node - the node record.
+   * @param {string} workspaceId - the node workspace the command runs in.
+   * @param {string} command - the command, in that node dialect's wording.
+   * @param {string} [cwdRel] - node-root-relative directory to run it in.
+   * @param {{ maxOutputTokens?: number }} [options] - codex-only extras.
+   */
+  const runShell = async (node, workspaceId, command, cwdRel = '', options = {}) => {
+    const tool = shellToolFor(node.name)
+    if (tool === 'bash') {
+      return await callNode(node.name, 'bash', {
+        workspaceId,
+        command,
+        ...(cwdRel.length === 0 ? {} : { workingDirectory: cwdRel }),
+      })
+    }
+    const win = nodeDialect(node, tool) === 'win'
+    return await callNode(node.name, 'exec_command', {
+      workspace_id: workspaceId,
+      cmd: command,
+      ...(options.maxOutputTokens === undefined ? {} : { max_output_tokens: options.maxOutputTokens }),
+      ...(cwdRel.length === 0 ? {} : { working_directory: win ? cwdRel.split('/').join('\\') : cwdRel }),
+    })
   }
 
   /** Split a node-relative path into its parent and leaf. */
@@ -534,11 +622,13 @@ export function apply(ctx, config = {}) {
     if (raw.length === 0) throw new HttpError(400, '需要一个远端路径')
     const root = normalizeRemotePath(node.root)
     let combined
-    if (/^[A-Za-z]:\//.test(raw) || raw.startsWith('//')) {
+    if (/^[A-Za-z]:\//.test(raw) || raw.startsWith('//') || raw.startsWith('/')) {
       const target = normalizeRemotePath(raw)
-      const lowerRoot = root.toLowerCase()
-      const lowerTarget = target.toLowerCase()
-      if (lowerTarget !== lowerRoot && !lowerTarget.startsWith(`${lowerRoot}/`)) {
+      // Windows paths compare case-insensitively; POSIX paths do not.
+      const win = dialectFor(node) === 'win'
+      const left = win ? root.toLowerCase() : root
+      const right = win ? target.toLowerCase() : target
+      if (right !== left && !right.startsWith(`${left}/`)) {
         throw new HttpError(400, `远端路径必须在节点根 ${node.root} 内：${raw}`)
       }
       combined = target.slice(root.length)
@@ -550,10 +640,11 @@ export function apply(ctx, config = {}) {
     return parts.join('/')
   }
 
-  /** Absolute remote spelling of a node-root-relative path. */
+  /** Absolute remote spelling of a node-root-relative path, in the node's separator. */
   const toRemoteAbsolute = (node, rel) => {
     const root = String(node.root).replace(/[\\/]+$/, '')
-    return rel.length === 0 ? root : `${root}\\${rel.split('/').join('\\')}`
+    if (rel.length === 0) return root
+    return dialectFor(node) === 'win' ? `${root}\\${rel.split('/').join('\\')}` : `${root}/${rel}`
   }
 
   /** The mirror store plus the root in force. */
@@ -604,23 +695,28 @@ export function apply(ctx, config = {}) {
     const node = await requireNode(input?.node)
     const { rel } = splitRemote(input?.path)
     const workspaceId = await workspaceIdForRoot(node)
-    // `-Force` keeps hidden entries in the listing: what to show is the dialog's
-    // decision, so every row carries the Hidden attribute as a `|`-separated
-    // flag instead (a pipe cannot appear in a Windows directory name, so the
-    // split is unambiguous).
-    const script = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-      + 'Get-ChildItem -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name | '
-      + 'ForEach-Object { $h = if (($_.Attributes -band [IO.FileAttributes]::Hidden) -ne 0) { "1" } else { "0" }; "$($_.Name)|$h" }'
-    const result = await callNode(node.name, 'exec_command', {
-      workspace_id: workspaceId,
-      cmd: script,
-      ...(rel.length === 0 ? {} : { working_directory: rel.split('/').join('\\') }),
-    })
+    const win = dialectFor(node) === 'win'
+    // Every row carries the Hidden flag so the dialog can decide what to show.
+    // Windows rows are `name|hidden` (a pipe cannot appear in a Windows
+    // directory name); POSIX rows are `hidden<TAB>name`, because a POSIX name
+    // may contain `|` and `ls -1A` alone cannot flag a hidden entry.
+    const command = win
+      ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
+        + 'Get-ChildItem -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name | '
+        + 'ForEach-Object { $h = if (($_.Attributes -band [IO.FileAttributes]::Hidden) -ne 0) { "1" } else { "0" }; "$($_.Name)|$h" }'
+      : 'ls -1A | while IFS= read -r entry; do [ -d "$entry" ] || continue; '
+        + 'case "$entry" in .*) flag=1;; *) flag=0;; esac; printf \'%s\\t%s\\n\' "$flag" "$entry"; done'
+    const result = await runShell(node, workspaceId, command, rel)
     if (result.isError === true) throw new HttpError(502, resultText(result) || '列目录失败')
     const entries = resultText(result).split(/\r?\n/)
       .map(line => line.replace(/\r$/, ''))
-      .filter(line => line.trim().length > 0 && !/^Process exited with code/.test(line.trim()))
+      .filter(line => line.trim().length > 0 && !/^(?:Process|Command) exited with code/.test(line.trim()))
       .map((line) => {
+        if (!win) {
+          const tab = line.indexOf('\t')
+          if (tab === -1) return { name: line, hidden: line.startsWith('.') }
+          return { name: line.slice(tab + 1), hidden: line.slice(0, tab).trim() === '1' }
+        }
         const cut = line.lastIndexOf('|')
         const name = (cut === -1 ? line : line.slice(0, cut)).trim()
         return { name, hidden: cut !== -1 && line.slice(cut + 1).trim() === '1' }
@@ -649,10 +745,14 @@ export function apply(ctx, config = {}) {
     }
     const workspaceId = await workspaceIdForRoot(node)
     const target = rel.length === 0 ? name : `${rel}/${name}`
-    const result = await callNode(node.name, 'exec_command', {
-      workspace_id: workspaceId,
-      cmd: `[Console]::OutputEncoding=[Text.Encoding]::UTF8; New-Item -ItemType Directory -Force -Path ${psQuote(target)} | Select-Object -ExpandProperty Name`,
-    })
+    const result = await runShell(
+      node,
+      workspaceId,
+      dialectFor(node) === 'win'
+        ? `[Console]::OutputEncoding=[Text.Encoding]::UTF8; New-Item -ItemType Directory -Force -Path ${psQuote(target)} | Select-Object -ExpandProperty Name`
+        : `mkdir -p -- ${shQuote(name)}`,
+      rel,
+    )
     if (result.isError === true) throw new HttpError(502, resultText(result) || '新建目录失败')
     return await listRemote({ node: node.name, path: rel })
   }
@@ -662,12 +762,17 @@ export function apply(ctx, config = {}) {
     const file = join(localPath, 'AGENTS.md')
     if (existsSync(file)) return
     const label = node.label.length > 0 ? node.label : node.name
+    const tools = toolNamesFor(node.name)
+    const toolLine = tools.length > 0
+      ? tools.map(name => `\`${name}\``).join(' / ')
+      : '`read` / `write` / `edit` / `bash`'
+    const example = dialectFor(node) === 'win' ? `${remoteAbsolute}\\src\\x.ts` : `${remoteAbsolute}/src/x.ts`
     const body = [
       `# 远端镜像工作区（DevSpace · ${label}）`,
       '',
       `这个本地目录是「${node.name}」节点上 \`${remoteAbsolute}\` 的镜像工作区，**不是**远端项目的副本：`,
       '',
-      `- 远端项目本身仍在节点 \`${node.name}\` 上（工具前缀 \`mcp__${node.name}__*\`：\`read\` / \`apply_patch\` / \`exec_command\` / \`write_stdin\` / \`show_changes\`）。读写远端代码、跑远端命令一律用这些工具，路径写远端形式（如 \`${remoteAbsolute}\\src\\x.ts\`）。`,
+      `- 远端项目本身仍在节点 \`${node.name}\` 上（工具前缀 \`mcp__${node.name}__*\`：${toolLine}）。读写远端代码、跑远端命令一律用这些工具，路径写远端形式（如 \`${example}\`）。`,
       '- 这个本地目录用来放：下载下来的数据、待上传的产物、本地分析/处理脚本。本地读写用普通本地工具即可。',
       '- 开工前先调 `devspace_target` 确认本会话的远端目标（节点 + 远端目录 + workspace_id），不要假设两边内容一致。',
       '- 传文件：`devspace_pull`（远端 → 本地镜像）与 `devspace_push`（本地 → 远端），二进制安全，按块传输。',
@@ -765,13 +870,12 @@ export function apply(ctx, config = {}) {
 
   /** Remote file facts: size in bytes; a directory is refused. */
   const remoteFileSize = async (node, rel) => {
-    const script = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-      + `$item = Get-Item -LiteralPath ${psQuote(rel)} -ErrorAction Stop; `
-      + 'if ($item.PSIsContainer) { Write-Error "is-a-directory"; exit 4 }; $item.Length'
-    const result = await callNode(node.name, 'exec_command', {
-      workspace_id: await workspaceIdForRoot(node),
-      cmd: script,
-    })
+    const script = dialectFor(node) === 'win'
+      ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
+        + `$item = Get-Item -LiteralPath ${psQuote(rel)} -ErrorAction Stop; `
+        + 'if ($item.PSIsContainer) { Write-Error "is-a-directory"; exit 4 }; $item.Length'
+      : `if [ -d ${shQuote(rel)} ]; then echo is-a-directory >&2; exit 4; fi; wc -c < ${shQuote(rel)}`
+    const result = await runShell(node, await workspaceIdForRoot(node), script)
     if (result.isError === true) throw new HttpError(502, resultText(result) || `读不到远端文件 ${rel}`)
     const line = resultText(result).split(/\r?\n/)
       .map(entry => entry.trim())
@@ -783,20 +887,19 @@ export function apply(ctx, config = {}) {
 
   /** One base64 chunk of a remote file, starting at `offset`. */
   const readRemoteChunk = async (node, rel, offset) => {
-    const script = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-      + `$fs = [IO.File]::OpenRead((Get-Item -LiteralPath ${psQuote(rel)}).FullName); `
-      + `$fs.Seek(${String(offset)}, 'Begin') | Out-Null; `
-      + `$buf = New-Object byte[] ${String(pullChunkBytes)}; `
-      + '$n = $fs.Read($buf, 0, $buf.Length); $fs.Close(); [Convert]::ToBase64String($buf, 0, $n)'
-    const result = await callNode(node.name, 'exec_command', {
-      workspace_id: await workspaceIdForRoot(node),
-      cmd: script,
-      max_output_tokens: 100_000,
-    })
+    const win = dialectFor(node) === 'win'
+    const script = win
+      ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
+        + `$fs = [IO.File]::OpenRead((Get-Item -LiteralPath ${psQuote(rel)}).FullName); `
+        + `$fs.Seek(${String(offset)}, 'Begin') | Out-Null; `
+        + `$buf = New-Object byte[] ${String(pullChunkBytes)}; `
+        + '$n = $fs.Read($buf, 0, $buf.Length); $fs.Close(); [Convert]::ToBase64String($buf, 0, $n)'
+      : `tail -c +${String(offset + 1)} < ${shQuote(rel)} | head -c ${String(pullChunkBytes)} | openssl base64 -A`
+    const result = await runShell(node, await workspaceIdForRoot(node), script, '', win ? { maxOutputTokens: 100_000 } : {})
     if (result.isError === true) throw new HttpError(502, resultText(result) || '读远端文件失败')
     const text = resultText(result).split(/\r?\n/)
       .map(entry => entry.trim())
-      .filter(entry => entry.length > 0 && !/^Process exited with code/.test(entry))
+      .filter(entry => entry.length > 0 && !/^(?:Process|Command) exited with code/.test(entry))
       .join('')
     if (!/^[A-Za-z0-9+/=]*$/.test(text)) throw new HttpError(502, `远端返回了非 base64 内容：${text.slice(0, 120)}`)
     return Buffer.from(text, 'base64')
@@ -810,16 +913,15 @@ export function apply(ctx, config = {}) {
    * @returns the remote file length the node reported.
    */
   const writeRemoteChunk = async (node, rel, base64, create) => {
-    const script = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-      + `$p = ${psQuote(rel)}; `
-      + 'New-Item -ItemType Directory -Force -Path (Split-Path -Parent $p) -ErrorAction SilentlyContinue | Out-Null; '
-      + `$bytes = [Convert]::FromBase64String(${psQuote(base64)}); `
-      + `$fs = [IO.File]::Open($p, ${create ? "'Create'" : "'Append'"}); `
-      + '$fs.Write($bytes, 0, $bytes.Length); $fs.Close(); (Get-Item -LiteralPath $p).Length'
-    const result = await callNode(node.name, 'exec_command', {
-      workspace_id: await workspaceIdForRoot(node),
-      cmd: script,
-    })
+    const script = dialectFor(node) === 'win'
+      ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
+        + `$p = ${psQuote(rel)}; `
+        + 'New-Item -ItemType Directory -Force -Path (Split-Path -Parent $p) -ErrorAction SilentlyContinue | Out-Null; '
+        + `$bytes = [Convert]::FromBase64String(${psQuote(base64)}); `
+        + `$fs = [IO.File]::Open($p, ${create ? "'Create'" : "'Append'"}); `
+        + '$fs.Write($bytes, 0, $bytes.Length); $fs.Close(); (Get-Item -LiteralPath $p).Length'
+      : `mkdir -p -- "$(dirname ${shQuote(rel)})"; printf %s ${shQuote(base64)} | openssl base64 -d -A ${create ? '>' : '>>'} ${shQuote(rel)}; wc -c < ${shQuote(rel)}`
+    const result = await runShell(node, await workspaceIdForRoot(node), script)
     if (result.isError === true) throw new HttpError(502, resultText(result) || '写远端文件失败')
     const reported = resultText(result).split(/\r?\n/)
       .map(line => line.trim())
@@ -963,7 +1065,7 @@ export function apply(ctx, config = {}) {
           provider: 'devspace',
           resourceBase: candidate.resourceBase,
           metadata: candidate.metadata,
-          content: renderSkill(nodes),
+          content: renderSkill(nodes, nodeName => toolNamesFor(nodeName)),
         }
       },
     }
