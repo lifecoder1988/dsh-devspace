@@ -757,6 +757,116 @@ export function apply(ctx, config = {}) {
     return await listRemote({ node: node.name, path: rel })
   }
 
+  /**
+   * List the FILES directly under one node-relative path, with sizes. The
+   * directory twin is `/ls`; both carry a hidden flag so a caller can filter
+   * without a second round trip. Windows rows are `name|hidden|bytes` (a pipe
+   * cannot appear in a Windows name); POSIX rows are tab-separated, because a
+   * POSIX name may contain a pipe.
+   */
+  const listFilesRemote = async (nodeName, path) => {
+    const node = await requireNode(nodeName)
+    const { rel } = splitRemote(path)
+    const win = dialectFor(node) === 'win'
+    const command = win
+      ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
+        + 'Get-ChildItem -File -Force -ErrorAction SilentlyContinue | Sort-Object Name | '
+        + 'ForEach-Object { $h = if (($_.Attributes -band [IO.FileAttributes]::Hidden) -ne 0) { "1" } else { "0" }; "$($_.Name)|$h|$($_.Length)" }'
+      : 'ls -1A | while IFS= read -r entry; do [ -f "$entry" ] || continue; '
+        + 'case "$entry" in .*) flag=1;; *) flag=0;; esac; printf \'%s\\t%s\\t%s\\n\' "$entry" "$flag" "$(wc -c < "$entry" | tr -d "  ")"; done'
+    const result = await runShell(node, await workspaceIdForRoot(node), command, rel)
+    if (result.isError === true) throw new HttpError(502, resultText(result) || '列文件失败')
+    const files = resultText(result).split(/\r?\n/)
+      .map(line => line.replace(/\r$/, ''))
+      .filter(line => line.trim().length > 0 && !/^(?:Process|Command) exited with code/.test(line.trim()))
+      .map((line) => {
+        const parts = win ? line.split('|') : line.split('\t')
+        const name = (parts[0] ?? '').trim()
+        return {
+          name,
+          hidden: (parts[1] ?? '').trim() === '1',
+          bytes: Number.isFinite(Number(parts[2])) ? Number(parts[2]) : 0,
+          path: rel.length === 0 ? name : `${rel}/${name}`,
+        }
+      })
+      .filter(entry => entry.name.length > 0)
+    return { node: node.name, root: node.root, path: rel, files }
+  }
+
+  /**
+   * The node-manager service other plugins consume: `ctx.get('devspace')`.
+   *
+   * Reading a remote node's content (its skills, its MCP config, its env keys)
+   * belongs to whoever owns that node, so it is served here rather than
+   * re-implemented per plugin: every method is dialect-aware (a claude-style
+   * node gets POSIX commands, a codex-style node PowerShell) and every path is
+   * resolved inside the node's allowed root.
+   */
+  ctx.provide('devspace', {
+    version: 1,
+    /** Enabled nodes with their live mount state. */
+    nodes: async () => (await readNodes(nodesFile, warn))
+      .filter(node => node.enabled !== false)
+      .map(node => ({
+        name: node.name,
+        label: node.label,
+        root: node.root,
+        notes: node.notes,
+        platform: node.platform ?? '',
+        dialect: dialectFor(node),
+        state: applied.get(node.name)?.state ?? 'pending',
+        error: applied.get(node.name)?.error ?? null,
+        toolCount: toolsFor(node.name).length,
+      })),
+    /** The bare names of every tool the node publishes. */
+    tools: async (nodeName) => (await requireNode(nodeName), toolsFor(nodeName)
+      .map(name => name.slice(`mcp__${nodeName}__`.length))),
+    /** One directory level: directories only. */
+    listDirs: async (nodeName, path) => (await listRemote({ node: nodeName, path })).entries,
+    /** One directory level: files only, with sizes. */
+    listFiles: (nodeName, path) => listFilesRemote(nodeName, path),
+    /** One bounded text file. */
+    readText: async (nodeName, path, maxBytes = 64 * 1024) => {
+      const node = await requireNode(nodeName)
+      const { rel } = splitRemote(path)
+      if (rel.length === 0) throw new HttpError(400, '需要一个文件路径')
+      const win = dialectFor(node) === 'win'
+      const limit = Math.max(1, Math.floor(Number(maxBytes) || 64 * 1024))
+      const command = win
+        ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
+          + `$p = ${psQuote(rel)}; if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { exit 3 }; `
+          + `$bytes = [IO.File]::ReadAllBytes((Get-Item -LiteralPath $p).FullName); `
+          + `$take = [Math]::Min(${String(limit)}, $bytes.Length); `
+          + `[Text.Encoding]::UTF8.GetString($bytes, 0, $take)`
+        : `p=${shQuote(rel)}; [ -f "$p" ] || exit 3; head -c ${String(limit)} "$p"`
+      const result = await runShell(node, await workspaceIdForRoot(node), command, '')
+      if (result.isError === true) {
+        const text = resultText(result)
+        if (/\bexit 3\b|no such file|Cannot find path|找不到路径/i.test(text)) throw new HttpError(404, `远端没有这个文件：${rel}`)
+        throw new HttpError(502, text || '读远端文件失败')
+      }
+      const raw = resultText(result)
+      const lines = raw.split(/\r?\n/)
+        .filter(line => !/^(?:Process|Command) exited with code/.test(line.trim()))
+      return lines.join('\n')
+    },
+    /** Whether one node-relative path exists (as a file or a directory). */
+    exists: async (nodeName, path) => {
+      const node = await requireNode(nodeName)
+      const { rel } = splitRemote(path)
+      if (rel.length === 0) return true
+      const win = dialectFor(node) === 'win'
+      const command = win
+        ? `if (Test-Path -LiteralPath ${psQuote(rel)}) { 'yes' } else { 'no' }`
+        : `[ -e ${shQuote(rel)} ] && echo yes || echo no`
+      const result = await runShell(node, await workspaceIdForRoot(node), command, '')
+      if (result.isError === true) return false
+      return /\byes\b/.test(resultText(result))
+    },
+    /** Call any tool the node publishes (an escape hatch for its own surface). */
+    call: (nodeName, tool, args) => callNode(nodeName, tool, args),
+  }, candidate => candidate !== null && typeof candidate === 'object' && candidate.version === 1)
+
   /** Write the mirror's own AGENTS.md so any Session in it knows the truth. */
   const ensureMirrorReadme = async (localPath, node, rel, remoteAbsolute) => {
     const file = join(localPath, 'AGENTS.md')

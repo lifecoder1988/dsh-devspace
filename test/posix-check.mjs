@@ -52,6 +52,8 @@ async function executeNodeTool(name, args) {
 const ctx = {
   logger: { warn: message => warnings.push(String(message)), info: () => {}, error: () => {} },
   effect(fn) { const disposer = fn(); return () => { if (typeof disposer === 'function') disposer() } },
+  /** The node service this plugin publishes to other plugins. */
+  provide(name, value) { this.services = { ...(this.services ?? {}), [name]: value } },
   get(key) {
     if (key === 'workspaceRegistry') {
       return {

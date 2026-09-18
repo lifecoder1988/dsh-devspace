@@ -92,6 +92,8 @@ const ctx = {
     registered.push(label)
     return () => { if (typeof disposer === 'function') disposer() }
   },
+  /** The node service this plugin publishes to other plugins. */
+  provide(name, value) { this.services = { ...(this.services ?? {}), [name]: value } },
   get(key) {
     if (key === 'workspaceRegistry') {
       return {
