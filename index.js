@@ -599,6 +599,48 @@ export function apply(ctx, config = {}) {
     })
   }
 
+  /**
+   * Where a caller's path is anchored: the node's allowed root (`~/` absent), or
+   * the node's HOME directory (`~/…`, where user-level skills and configs live).
+   * @param {string} path - the caller's path.
+   * @returns {{ home: boolean, rel: string }} the anchor and its relative part.
+   */
+  const resolveNodePath = (path) => {
+    const raw = String(path ?? '').trim().replace(/\\/g, '/')
+    if (raw === '~' || raw.startsWith('~/')) return { home: true, rel: splitRemote(raw.replace(/^~\/?/, '')).rel }
+    return { home: false, rel: splitRemote(raw).rel }
+  }
+
+  /**
+   * A command prefix that moves into a HOME-relative directory, so every listing
+   * and read can address `~/.claude/skills` and friends without absolute paths.
+   */
+  const homePrefix = (node, rel) => {
+    const win = dialectFor(node) === 'win'
+    if (win) {
+      const target = rel.length === 0 ? '$env:USERPROFILE' : `(Join-Path $env:USERPROFILE ${psQuote(rel.split('/').join('\\'))})`
+      return `Set-Location -LiteralPath ${target} -ErrorAction Stop; `
+    }
+    const target = rel.length === 0 ? '"$HOME"' : `"$HOME"/${shQuote(rel)}`
+    return `cd ${target} || { echo 'agents-md:no-such-home-dir' >&2; exit 3; }; `
+  }
+
+  /**
+   * Refuse to treat a shell failure as data: a spawn error ("spawn … ENOENT")
+   * or a missing-path message would otherwise become a listing row.
+   * @param {string} text - the raw command output.
+   */
+  const assertShellOutput = (text) => {
+    const trimmed = String(text ?? '').trim()
+    if (trimmed.length === 0) return
+    if (/\bspawn\b[^\n]*ENOENT/i.test(trimmed)
+      || /^\s*(?:bash|sh|zsh|pwsh|powershell)[^\n]*no such file/i.test(trimmed)
+      || /is not recognized as the name of a cmdlet/i.test(trimmed)
+      || /no-such-home-dir/.test(trimmed)) {
+      throw new HttpError(502, `远端 shell 报错：${trimmed.slice(0, 300)}`)
+    }
+  }
+
   /** Split a node-relative path into its parent and leaf. */
   const splitRemote = (rel) => {
     const clean = String(rel ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
@@ -693,7 +735,7 @@ export function apply(ctx, config = {}) {
   /** List the directories directly under one node-relative path. */
   const listRemote = async (input) => {
     const node = await requireNode(input?.node)
-    const { rel } = splitRemote(input?.path)
+    const { home, rel } = resolveNodePath(input?.path)
     const workspaceId = await workspaceIdForRoot(node)
     const win = dialectFor(node) === 'win'
     // Every row carries the Hidden flag so the dialog can decide what to show.
@@ -706,8 +748,9 @@ export function apply(ctx, config = {}) {
         + 'ForEach-Object { $h = if (($_.Attributes -band [IO.FileAttributes]::Hidden) -ne 0) { "1" } else { "0" }; "$($_.Name)|$h" }'
       : 'ls -1A | while IFS= read -r entry; do [ -d "$entry" ] || continue; '
         + 'case "$entry" in .*) flag=1;; *) flag=0;; esac; printf \'%s\\t%s\\n\' "$flag" "$entry"; done'
-    const result = await runShell(node, workspaceId, command, rel)
+    const result = await runShell(node, workspaceId, home ? `${homePrefix(node, rel)}${command}` : command, home ? '' : rel)
     if (result.isError === true) throw new HttpError(502, resultText(result) || '列目录失败')
+    assertShellOutput(resultText(result))
     const entries = resultText(result).split(/\r?\n/)
       .map(line => line.replace(/\r$/, ''))
       .filter(line => line.trim().length > 0 && !/^(?:Process|Command) exited with code/.test(line.trim()))
@@ -722,15 +765,17 @@ export function apply(ctx, config = {}) {
         return { name, hidden: cut !== -1 && line.slice(cut + 1).trim() === '1' }
       })
       .filter(entry => entry.name.length > 0)
+    const prefix = home ? (rel.length === 0 ? '~' : `~/${rel}`) : rel
     return {
       node: node.name,
       root: node.root,
-      path: rel,
+      path: prefix,
+      home,
       parent: splitRemote(rel).parent,
       entries: entries.map(entry => ({
         name: entry.name,
         hidden: entry.hidden,
-        path: rel.length === 0 ? entry.name : `${rel}/${entry.name}`,
+        path: prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`,
       })),
     }
   }
@@ -766,7 +811,7 @@ export function apply(ctx, config = {}) {
    */
   const listFilesRemote = async (nodeName, path) => {
     const node = await requireNode(nodeName)
-    const { rel } = splitRemote(path)
+    const { home, rel } = resolveNodePath(path)
     const win = dialectFor(node) === 'win'
     const command = win
       ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
@@ -774,8 +819,9 @@ export function apply(ctx, config = {}) {
         + 'ForEach-Object { $h = if (($_.Attributes -band [IO.FileAttributes]::Hidden) -ne 0) { "1" } else { "0" }; "$($_.Name)|$h|$($_.Length)" }'
       : 'ls -1A | while IFS= read -r entry; do [ -f "$entry" ] || continue; '
         + 'case "$entry" in .*) flag=1;; *) flag=0;; esac; printf \'%s\\t%s\\t%s\\n\' "$entry" "$flag" "$(wc -c < "$entry" | tr -d "  ")"; done'
-    const result = await runShell(node, await workspaceIdForRoot(node), command, rel)
+    const result = await runShell(node, await workspaceIdForRoot(node), home ? `${homePrefix(node, rel)}${command}` : command, home ? '' : rel)
     if (result.isError === true) throw new HttpError(502, resultText(result) || '列文件失败')
+    assertShellOutput(resultText(result))
     const files = resultText(result).split(/\r?\n/)
       .map(line => line.replace(/\r$/, ''))
       .filter(line => line.trim().length > 0 && !/^(?:Process|Command) exited with code/.test(line.trim()))
@@ -790,7 +836,8 @@ export function apply(ctx, config = {}) {
         }
       })
       .filter(entry => entry.name.length > 0)
-    return { node: node.name, root: node.root, path: rel, files }
+    const prefix = home ? (rel.length === 0 ? '~' : `~/${rel}`) : rel
+    return { node: node.name, root: node.root, path: prefix, home, files }
   }
 
   /**
@@ -828,18 +875,19 @@ export function apply(ctx, config = {}) {
     /** One bounded text file. */
     readText: async (nodeName, path, maxBytes = 64 * 1024) => {
       const node = await requireNode(nodeName)
-      const { rel } = splitRemote(path)
+      const { home, rel } = resolveNodePath(path)
       if (rel.length === 0) throw new HttpError(400, '需要一个文件路径')
       const win = dialectFor(node) === 'win'
       const limit = Math.max(1, Math.floor(Number(maxBytes) || 64 * 1024))
+      const leaf = home ? (rel.split('/').pop() ?? rel) : rel
       const command = win
         ? '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-          + `$p = ${psQuote(rel)}; if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { exit 3 }; `
+          + `$p = ${psQuote(leaf)}; if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { exit 3 }; `
           + `$bytes = [IO.File]::ReadAllBytes((Get-Item -LiteralPath $p).FullName); `
           + `$take = [Math]::Min(${String(limit)}, $bytes.Length); `
           + `[Text.Encoding]::UTF8.GetString($bytes, 0, $take)`
-        : `p=${shQuote(rel)}; [ -f "$p" ] || exit 3; head -c ${String(limit)} "$p"`
-      const result = await runShell(node, await workspaceIdForRoot(node), command, '')
+        : `p=${shQuote(leaf)}; [ -f "$p" ] || exit 3; head -c ${String(limit)} "$p"`
+      const result = await runShell(node, await workspaceIdForRoot(node), home ? `${homePrefix(node, rel.split('/').slice(0, -1).join('/'))}${command}` : command, '')
       if (result.isError === true) {
         const text = resultText(result)
         if (/\bexit 3\b|no such file|Cannot find path|找不到路径/i.test(text)) throw new HttpError(404, `远端没有这个文件：${rel}`)
@@ -853,13 +901,14 @@ export function apply(ctx, config = {}) {
     /** Whether one node-relative path exists (as a file or a directory). */
     exists: async (nodeName, path) => {
       const node = await requireNode(nodeName)
-      const { rel } = splitRemote(path)
+      const { home, rel } = resolveNodePath(path)
       if (rel.length === 0) return true
       const win = dialectFor(node) === 'win'
+      const leaf = home ? (rel.split('/').pop() ?? rel) : rel
       const command = win
-        ? `if (Test-Path -LiteralPath ${psQuote(rel)}) { 'yes' } else { 'no' }`
-        : `[ -e ${shQuote(rel)} ] && echo yes || echo no`
-      const result = await runShell(node, await workspaceIdForRoot(node), command, '')
+        ? `if (Test-Path -LiteralPath ${psQuote(leaf)}) { 'yes' } else { 'no' }`
+        : `[ -e ${shQuote(leaf)} ] && echo yes || echo no`
+      const result = await runShell(node, await workspaceIdForRoot(node), home ? `${homePrefix(node, rel.split('/').slice(0, -1).join('/'))}${command}` : command, '')
       if (result.isError === true) return false
       return /\byes\b/.test(resultText(result))
     },
