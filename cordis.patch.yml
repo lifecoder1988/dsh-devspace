@@ -1,0 +1,4 @@
+# DevSpace: per-workspace remote binding plus a cwd-scoped skill provider.
+- insert:
+    - id: devspace
+      name: '@local/dsh-devspace'

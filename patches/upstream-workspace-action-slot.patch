@@ -1,0 +1,148 @@
+diff --git a/packages/client/ui-primitives/src/Menu.tsx b/packages/client/ui-primitives/src/Menu.tsx
+index bb04912..a8ea811 100644
+--- a/packages/client/ui-primitives/src/Menu.tsx
++++ b/packages/client/ui-primitives/src/Menu.tsx
+@@ -89,12 +89,14 @@ const MEASURE_STYLE: CSSProperties = { visibility: 'hidden', left: 0, top: 0 }
+  * crowds the cell).
+  * @returns anchor wrapper with the conditional list.
+  */
+-export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, onClose, align = 'start', side = 'bottom', portal = false, closeOnPointerLeave = false, dense = false, compact = false, autoFocus = false, selection = 'check', getAnchorRect, footer, className }: {
++export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, onClose, align = 'start', side = 'bottom', portal = false, closeOnPointerLeave = false, dense = false, compact = false, autoFocus = false, selection = 'check', getAnchorRect, footer, footerNode, className }: {
+   open: boolean
+   autoFocus?: boolean
+   anchor: ReactNode
+   items: readonly MenuEntry[]
+   footer?: readonly MenuEntry[]
++  /** Extra content rendered inside the popover, directly below the footer rows. */
++  footerNode?: ReactNode
+   selectedId?: string | undefined
+   selectedIds?: readonly string[] | undefined
+   onSelect: (id: string) => void
+@@ -415,9 +417,10 @@ export function Menu({ open, anchor, items, selectedId, selectedIds, onSelect, o
+       <div className={css.viewport} role="presentation">
+         {items.map(renderEntry)}
+       </div>
+-      {footer !== undefined && footer.length > 0 && (
++      {((footer !== undefined && footer.length > 0) || footerNode !== undefined) && (
+         <div className={css.footer} role="presentation">
+-          {footer.map(renderEntry)}
++          {footer?.map(renderEntry)}
++          {footerNode}
+         </div>
+       )}
+     </div>
+diff --git a/packages/client/ui-workspace/src/client/WorkspacePicker.tsx b/packages/client/ui-workspace/src/client/WorkspacePicker.tsx
+index b1801cc..3c49bb8 100644
+--- a/packages/client/ui-workspace/src/client/WorkspacePicker.tsx
++++ b/packages/client/ui-workspace/src/client/WorkspacePicker.tsx
+@@ -17,7 +17,7 @@ import type {
+   WorkspaceId, WorkspaceSnapshot, WorkspaceView,
+ } from '@deepseek-ai/dsh-api-workspace-controller/client'
+ import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
+-import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
++import type { DirectoryFlowOwnerProps, WorkspaceActionOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
+ import css from './WorkspacePicker.module.css'
+ 
+ const ADD_WORKSPACE = '::add-workspace'
+@@ -38,6 +38,13 @@ export interface WorkspacePickFlowProps {
+   useDirectoryFlow: SnapshotSelectorHook<boolean>
+   /** Render this surface's directory-flow hole with the owner conversation (the entry's narrowed renderSlot). */
+   renderDirectoryFlow: (owner: DirectoryFlowOwnerProps) => ReactNode
++  /**
++   * Render this surface's plugin-contributed actions inside the popover (the
++   * entry's narrowed renderSlot). Omitted by a surface whose hole declares no
++   * action child — the sidebar's `sidebar.workspaces` declares only the
++   * directory flow — which leaves the popover without that footer.
++   */
++  renderAction?: (owner: WorkspaceActionOwnerProps) => ReactNode
+   /** A real Workspace was picked or created. */
+   onPick: (workspaceId: WorkspaceId) => void
+   /** Close the popover (outside click / Escape / post-pick). */
+@@ -63,6 +70,7 @@ export function WorkspacePickFlow({
+   createWorkspace,
+   useDirectoryFlow,
+   renderDirectoryFlow,
++  renderAction,
+   onPick,
+   onClose,
+   addOnly = false,
+@@ -187,6 +195,7 @@ export function WorkspacePickFlow({
+         anchor={null}
+         items={items}
+         {...pinAdd ? { footer: addEntries } : {}}
++        {...renderAction === undefined ? {} : { footerNode: renderAction({ busy: flowBusy, onClose, getAnchorRect }) }}
+         selectedId={selectedId}
+         onSelect={handleSelect}
+         onClose={onClose}
+@@ -243,6 +252,7 @@ export function WorkspacePicker({
+       createWorkspace={createWorkspace}
+       useDirectoryFlow={useDirectoryFlow}
+       renderDirectoryFlow={owner => renderSlot('conversation.hero.workspace.directoryFlow', owner)}
++      renderAction={owner => renderSlot('conversation.hero.workspace.action', owner)}
+       selectedId={selectedId}
+       onPick={onPick}
+       onClose={onClose}
+diff --git a/packages/client/ui-workspace/src/client/contract/slots.ts b/packages/client/ui-workspace/src/client/contract/slots.ts
+index baa263b..1f87aed 100644
+--- a/packages/client/ui-workspace/src/client/contract/slots.ts
++++ b/packages/client/ui-workspace/src/client/contract/slots.ts
+@@ -51,12 +51,34 @@ export interface DirectoryFlowOwnerProps {
+   onError: (message: string) => void
+ }
+ 
++/**
++ * Owner share of the extra actions a plugin contributes under the picker's
++ * "Add workspace…" row: the popover is still open, so an action may expand in
++ * place and must be able to close it.
++ */
++export interface WorkspaceActionOwnerProps {
++  /** True while the owner is adopting a picked directory; actions should disable their commit affordances. */
++  busy: boolean
++  /** Close the picker's popover (and whatever the action opened). */
++  onClose: () => void
++  /**
++   * Popover anchor bounds, so an action that replaces the popover with its own
++   * panel can place it where the popover was.
++   */
++  getAnchorRect?: () => DOMRect | null
++}
++
+ declare module '@deepseek-ai/dsh-client-ui-slots' {
+   interface SlotMap {
+     /** Directory-flow hole under the conversation empty-state picker (declared by the WorkspacePicker entry). */
+     'conversation.hero.workspace.directoryFlow': { kind: 'single'; scope: 'root'; owner: DirectoryFlowOwnerProps }
+     /** Directory-flow hole under the sidebar browsing region (declared by the WorkspaceBrowser entry). */
+     'sidebar.workspaces.directoryFlow': { kind: 'single'; scope: 'root'; owner: DirectoryFlowOwnerProps }
++    /**
++     * Plugin-contributed actions rendered inside the empty-state picker's popover,
++     * directly below "Add workspace…" (declared by the WorkspacePicker entry).
++     */
++    'conversation.hero.workspace.action': { kind: 'list'; scope: 'root'; owner: WorkspaceActionOwnerProps }
+   }
+ }
+ 
+@@ -165,6 +187,7 @@ export type WorkspacePickerInjected = DirectoryPickingInjected & {
+ export type WorkspacePickerProps =
+   PropsRuntime<'conversation.hero.workspace'>
+   & PropsRenderSlots<'conversation.hero.workspace.directoryFlow'>
++  & PropsRenderSlots<'conversation.hero.workspace.action'>
+   & Omit<WorkspacePickerInjected, 'hooks'>
+   & DirectoryPickingHooks
+   & PropsLocale<'workspace'>
+diff --git a/packages/client/ui-workspace/src/client/index.ts b/packages/client/ui-workspace/src/client/index.ts
+index 514ddd9..84729c4 100644
+--- a/packages/client/ui-workspace/src/client/index.ts
++++ b/packages/client/ui-workspace/src/client/index.ts
+@@ -154,7 +154,11 @@ export function apply(ctx: Context): void {
+   ctx.slots.inject('conversation.hero.workspace', () => ctx.slots.register(
+     {
+       name: 'conversation.hero.workspace',
+-      children: { 'conversation.hero.workspace.directoryFlow': { kind: 'single', scope: 'root' } },
++      children: {
++        'conversation.hero.workspace.directoryFlow': { kind: 'single', scope: 'root' },
++        // Plugin-contributed actions inside the popover, under "Add workspace…".
++        'conversation.hero.workspace.action': { kind: 'list', scope: 'root' },
++      },
+       inject: pickerInjected,
+       locale: NS,
+     },

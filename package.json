@@ -1,0 +1,38 @@
+{
+  "name": "@local/dsh-devspace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DevSpace nodes and remote-directory mirror workspaces for the DeepSeek Harness: manage N MCP endpoints in one place, adopt a remote directory as a local mirror Workspace, and move files with devspace_pull / devspace_push",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "license": "MIT",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "devspace",
+    "remote",
+    "mcp",
+    "workspace"
+  ],
+  "files": [
+    "cordis.patch.yml",
+    "index.js",
+    "client.js",
+    "README.md",
+    "LICENSE"
+  ]
+}
