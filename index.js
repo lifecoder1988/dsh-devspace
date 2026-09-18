@@ -622,7 +622,7 @@ export function apply(ctx, config = {}) {
       return `Set-Location -LiteralPath ${target} -ErrorAction Stop; `
     }
     const target = rel.length === 0 ? '"$HOME"' : `"$HOME"/${shQuote(rel)}`
-    return `cd ${target} || { echo 'agents-md:no-such-home-dir' >&2; exit 3; }; `
+    return `cd ${target} || { echo 'devspace:no-such-home-dir' >&2; exit 3; }; `
   }
 
   /**
@@ -633,10 +633,16 @@ export function apply(ctx, config = {}) {
   const assertShellOutput = (text) => {
     const trimmed = String(text ?? '').trim()
     if (trimmed.length === 0) return
+    // The shell's own trailer is the authoritative signal: a non-zero exit is a
+    // failure even when the tool reports success.
+    const exit = /(?:Process|Command) exited with code (\d+)/.exec(trimmed)
+    if (exit !== null && exit[1] !== '0') {
+      throw new HttpError(502, `远端命令退出码 ${exit[1]}：${trimmed.slice(0, 300)}`)
+    }
     if (/\bspawn\b[^\n]*ENOENT/i.test(trimmed)
       || /^\s*(?:bash|sh|zsh|pwsh|powershell)[^\n]*no such file/i.test(trimmed)
       || /is not recognized as the name of a cmdlet/i.test(trimmed)
-      || /no-such-home-dir/.test(trimmed)) {
+      || /CategoryInfo|FullyQualifiedErrorId|Set-Location\s*:|找不到路径|no-such-home-dir/.test(trimmed)) {
       throw new HttpError(502, `远端 shell 报错：${trimmed.slice(0, 300)}`)
     }
   }
