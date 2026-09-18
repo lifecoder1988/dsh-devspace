@@ -1,0 +1,285 @@
+diff --git a/packages/client/ui-conversation/src/client/apply.ts b/packages/client/ui-conversation/src/client/apply.ts
+index 79ffd97..4d92442 100644
+--- a/packages/client/ui-conversation/src/client/apply.ts
++++ b/packages/client/ui-conversation/src/client/apply.ts
+@@ -253,6 +253,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
+       'conversation.input.dock': { kind: 'list', scope: 'session' },
+       'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
+       'conversation.hero.workspace': { kind: 'single', scope: 'root' },
++      // Plugin-contributed badge drawn beside the Hero workspace chip.
++      'conversation.hero.workspaceBadge': { kind: 'list', scope: 'session-maybe' },
+       'conversation.hero.agentPreset': { kind: 'single', scope: 'session-maybe' },
+     },
+     slots: {
+diff --git a/packages/client/ui-conversation/src/client/contract/slots.ts b/packages/client/ui-conversation/src/client/contract/slots.ts
+index d37387e..fdd1461 100644
+--- a/packages/client/ui-conversation/src/client/contract/slots.ts
++++ b/packages/client/ui-conversation/src/client/contract/slots.ts
+@@ -184,6 +184,18 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+     'conversation.hero.brand.mark': { kind: 'single'; scope: 'root'; owner: HeroBrandMarkOwnerProps }
+     /** Agent-preset control staged for a New Session. */
+     'conversation.hero.agentPreset': { kind: 'single'; scope: 'session-maybe'; owner: HeroAgentPresetOwnerProps }
++    /**
++     * Plugin-contributed badge rendered beside the Hero's workspace chip: the
++     * seat a plugin that owns a Workspace — a remote mirror, a mounted volume —
++     * uses to name the machine behind the directory it adopted. Rendered with
++     * the Workspace the chip currently names, so an entry decides for itself
++     * whether that Workspace is one of its own.
++     */
++    'conversation.hero.workspaceBadge': {
++      kind: 'list'
++      scope: 'session-maybe'
++      owner: WorkspaceChipBadgeOwnerProps
++    }
+     /** Full-width entries above the composer card. */
+     'conversation.input.dock': { kind: 'list'; scope: 'session'; owner: InputZone }
+     /** Floating entries rendered inside the resident composer card. */
+@@ -222,6 +234,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+         'conversation.input.dock': { kind: 'list'; scope: 'session' }
+         'conversation.hero.brand.mark': { kind: 'single'; scope: 'root' }
+         'conversation.hero.workspace': { kind: 'single'; scope: 'root' }
++        'conversation.hero.workspaceBadge': { kind: 'list'; scope: 'session-maybe' }
+         'conversation.hero.agentPreset': { kind: 'single'; scope: 'session-maybe' }
+       }
+       inject: ConversationInjected
+@@ -484,3 +497,9 @@ export interface EmptyWorkspaceOwnerProps {
+   onPick: (workspaceId: WorkspaceId) => void
+   onClose: () => void
+ }
++
++/** Owner share of the Hero workspace chip's plugin-contributed badge. */
++export interface WorkspaceChipBadgeOwnerProps {
++  /** The Workspace the chip names; omitted when the chip names none yet. */
++  readonly workspaceId?: WorkspaceId | undefined
++}
+diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx
+index adace1c..368b65e 100644
+--- a/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx
+@@ -71,6 +71,9 @@ export function ConversationContent(props: ConversationContentProps) {
+   const pendingWorkspace = workspaces.items.find(
+     workspace => workspace.workspaceId === pendingWorkspaceId,
+   )
++  // The chip names whichever Workspace it is about to show: a pending pick wins
++  // over the Session's own, exactly like the label above.
++  const chipWorkspaceId = pendingWorkspace?.workspaceId ?? sessionWorkspace?.workspaceId
+ 
+   // Clear the pending pick once the session lands in it, or when the picked
+   // workspace disappears from a ready list (deleted from the sidebar).
+@@ -108,6 +111,9 @@ export function ConversationContent(props: ConversationContentProps) {
+         label={chipTitle}
+         menuOpen={pickerOpen}
+         onClick={() => { setPickerOpen(open => !open) }}
++        badge={chipWorkspaceId === undefined
++          ? undefined
++          : renderSlot('conversation.hero.workspaceBadge', { workspaceId: chipWorkspaceId })}
+         t={t}
+       />
+       {renderSlot('conversation.hero.workspace', {
+diff --git a/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx b/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx
+index 22be826..169aca9 100644
+--- a/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx
+@@ -33,13 +33,16 @@ export function workspaceLabel(cwd: string): string {
+  * @param props.label - chip label (see {@link workspaceLabel}); omitted → placeholder.
+  * @param props.menuOpen - menu expansion echo.
+  * @param props.onClick - menu toggle.
++ * @param props.badge - plugin-contributed badge after the label; omitted → nothing.
+  * @returns the chip button element.
+  */
+-export function WorkspaceChip({ buttonRef, label, menuOpen = false, onClick, t }: {
++export function WorkspaceChip({ buttonRef, label, menuOpen = false, onClick, badge, t }: {
+   buttonRef?: RefObject<HTMLButtonElement>
+   label?: string | undefined
+   menuOpen?: boolean
+   onClick?: () => void
++  /** Plugin-contributed badge rendered after the label, before the chevron. */
++  badge?: ReactNode
+   t: HeroTranslate
+ }) {
+   return (
+@@ -56,6 +59,7 @@ export function WorkspaceChip({ buttonRef, label, menuOpen = false, onClick, t }
+         ? <IconFolderClose16 className={css.folder} size={16} />
+         : <IconFolderOpen16 className={css.folder} size={16} />}
+       <span className={css.workspaceLabel}>{label ?? t('hero.chooseWorkspace')}</span>
++      {badge}
+       <IconChevronDownOutline14 className={css.chevron} size={12} />
+     </button>
+   )
+diff --git a/packages/client/ui-workspace/src/client/contract/slots.ts b/packages/client/ui-workspace/src/client/contract/slots.ts
+index 1f87aed..ca7de57 100644
+--- a/packages/client/ui-workspace/src/client/contract/slots.ts
++++ b/packages/client/ui-workspace/src/client/contract/slots.ts
+@@ -51,6 +51,25 @@ export interface DirectoryFlowOwnerProps {
+   onError: (message: string) => void
+ }
+ 
++/**
++ * Owner share of a Workspace row's plugin-contributed badge: which Workspace the
++ * row stands for. The badge is decoration only — it owns no row behaviour, and
++ * an entry for a Workspace it does not own renders nothing.
++ */
++export interface WorkspaceRowBadgeOwnerProps {
++  /** The Workspace this row renders. */
++  readonly workspaceId: WorkspaceId
++}
++
++/**
++ * Owner share of the Hero workspace chip's plugin-contributed badge: which
++ * Workspace the chip currently names.
++ */
++export interface WorkspaceChipBadgeOwnerProps {
++  /** The Workspace the chip names; omitted when the chip names none yet. */
++  readonly workspaceId?: WorkspaceId | undefined
++}
++
+ /**
+  * Owner share of the extra actions a plugin contributes under the picker's
+  * "Add workspace…" row: the popover is still open, so an action may expand in
+@@ -79,6 +98,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+      * directly below "Add workspace…" (declared by the WorkspacePicker entry).
+      */
+     'conversation.hero.workspace.action': { kind: 'list'; scope: 'root'; owner: WorkspaceActionOwnerProps }
++    /**
++     * Plugin-contributed badge rendered after one Workspace row's title: the seat
++     * a plugin that owns a Workspace — a remote mirror, a mounted volume — marks
++     * the row with. Rendered once per Workspace row with that row's identity, so
++     * an entry decides for itself whether the Workspace it is handed is its own
++     * (declared by the WorkspaceBrowser entry).
++     */
++    'sidebar.workspaces.row.badge': { kind: 'list'; scope: 'root'; owner: WorkspaceRowBadgeOwnerProps }
+   }
+ }
+ 
+@@ -164,6 +191,7 @@ export type WorkspaceBrowserInjected = {
+ export type WorkspaceBrowserProps =
+   PropsRuntime<'sidebar.workspaces'>
+   & PropsRenderSlots<'sidebar.workspaces.directoryFlow'>
++  & PropsRenderSlots<'sidebar.workspaces.row.badge'>
+   & PropsStore<ReturnType<typeof createWorkspaceViewStore>>
+   & Omit<WorkspaceBrowserInjected, 'hooks'>
+   & PropsHooks<WorkspaceBrowserInjected['hooks']>
+diff --git a/packages/client/ui-workspace/src/client/index.ts b/packages/client/ui-workspace/src/client/index.ts
+index 84729c4..599b3dc 100644
+--- a/packages/client/ui-workspace/src/client/index.ts
++++ b/packages/client/ui-workspace/src/client/index.ts
+@@ -144,7 +144,11 @@ export function apply(ctx: Context): void {
+   ctx.slots.inject('sidebar.workspaces', () => ctx.slots.register(
+     {
+       name: 'sidebar.workspaces',
+-      children: { 'sidebar.workspaces.directoryFlow': { kind: 'single', scope: 'root' } },
++      children: {
++        'sidebar.workspaces.directoryFlow': { kind: 'single', scope: 'root' },
++        // Plugin-contributed badges drawn after a Workspace row's title.
++        'sidebar.workspaces.row.badge': { kind: 'list', scope: 'root' },
++      },
+       store: createWorkspaceViewStore(),
+       inject: browserInjected,
+       locale: NS,
+diff --git a/packages/client/ui-workspace/src/client/rows/Rows.module.css b/packages/client/ui-workspace/src/client/rows/Rows.module.css
+index a222d05..d912636 100644
+--- a/packages/client/ui-workspace/src/client/rows/Rows.module.css
++++ b/packages/client/ui-workspace/src/client/rows/Rows.module.css
+@@ -164,8 +164,18 @@
+   flex: 1;
+   min-width: 0;
+   display: flex;
+-  flex-direction: column;
+-  gap: 2px;
++  /* One line: the title, then any plugin badge. The rename input is that row's
++     only child, so the row direction serves both states. */
++  flex-direction: row;
++  align-items: center;
++  gap: 6px;
++}
++
++/* A plugin-contributed row badge (a remote-mirror mark), never squeezed. */
++.projectBadge {
++  flex: none;
++  display: inline-flex;
++  align-items: center;
+ }
+ 
+ .title {
+diff --git a/packages/client/ui-workspace/src/client/rows/Rows.tsx b/packages/client/ui-workspace/src/client/rows/Rows.tsx
+index 3d015f3..42de7d1 100644
+--- a/packages/client/ui-workspace/src/client/rows/Rows.tsx
++++ b/packages/client/ui-workspace/src/client/rows/Rows.tsx
+@@ -7,6 +7,7 @@
+  * session and workspace hover cards are suppressed while a menu is open.
+  */
+ import { useEffect, useRef, useState } from 'react'
++import type { ReactNode } from 'react'
+ import clsx from 'clsx'
+ import {
+   HoverCard, IconAlarmClockOutline16, IconArchiveOutline20, IconBranchOutline16,
+@@ -135,7 +136,7 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
+  * @param props.t - the browser root's locale seat.
+  * @returns the row element.
+  */
+-export function ProjectRowItem({ group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag, home, t }: {
++export function ProjectRowItem({ group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag, home, badge, t }: {
+   group: GroupNode
+   containsCurrentDescendant?: boolean
+   onToggle: () => void
+@@ -146,6 +147,8 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
+   drag?: WorkspaceRowDragProps | undefined
+   /** Host account home; POSIX home-rooted hover paths display as `~`. */
+   home?: string | undefined
++  /** Plugin-contributed badge drawn after the title; absent → nothing. */
++  badge?: ReactNode
+   t: RowTranslate
+ }) {
+   const row = group
+@@ -181,6 +184,9 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
+       </span>
+       <span className={css.projectText}>
+         <span className={css.title}>{label}</span>
++        {badge !== undefined && badge !== null && (
++          <span className={css.projectBadge}>{badge}</span>
++        )}
+       </span>
+       <span className={css.rowActions}>
+         {actions !== undefined && (
+diff --git a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
+index e41a695..e73491c 100644
+--- a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
++++ b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
+@@ -204,6 +204,11 @@ type SessionTreeProps = Pick<
+   revealSessionId?: SessionId | undefined
+   /** Acknowledge that the chosen Session row has been revealed. */
+   onSessionRevealed: (sessionId: SessionId) => void
++  /**
++   * Render one Workspace row's plugin-contributed badge (the entry's narrowed
++   * renderSlot for `sidebar.workspaces.row.badge`).
++   */
++  renderWorkspaceBadge: (workspaceId: WorkspaceId) => ReactNode
+ }
+ 
+ /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
+@@ -215,6 +220,7 @@ function SessionTree({
+   insertWorkspaceBefore,
+   nestWorkspaces, groupExpansion, setGroupExpanded,
+   setSessionOrder, home, t,
++  renderWorkspaceBadge,
+   revealSessionId, onSessionRevealed,
+ }: SessionTreeProps) {
+   const panelActive = usePanelInfo(info => info.activePanelId !== null)
+@@ -462,6 +468,9 @@ function SessionTree({
+             }
+           }}
+           drag={workspaceDragProps}
++          badge={group.workspaceId === undefined
++            ? undefined
++            : renderWorkspaceBadge(group.workspaceId)}
+           actions={group.workspaceId === undefined
+             ? undefined
+             : {
+@@ -1296,6 +1305,7 @@ export function WorkspaceBrowser({
+                 onSessionRevealed={acknowledgeSessionReveal}
+                 home={home}
+                 t={t}
++                renderWorkspaceBadge={workspaceId => renderSlot('sidebar.workspaces.row.badge', { workspaceId })}
+                 onRenameRequest={(workspaceId, currentTitle) => {
+                   setRenameTarget({ workspaceId, currentTitle })
+                   setRenameDraft(currentTitle)

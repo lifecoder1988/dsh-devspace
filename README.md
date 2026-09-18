@@ -39,6 +39,8 @@ DevSpace 这类远端执行器把「另一台机器上的目录」暴露成 MCP 
 
 ## 依赖：两个上游 client 补丁
 
+**补丁一：工作区菜单里的「Add Remote…」**
+
 「Add Remote…」这一行落在 DSH 的 `conversation.hero.workspace.action` 槽位上。这个槽位是通用的扩展点，为此仓库带了一份最小补丁：
 
 ```
@@ -48,15 +50,51 @@ patches/upstream-workspace-action-slot.patch
 - `packages/client/ui-primitives/src/Menu.tsx`：`Menu` 增加可选的 `footerNode`（在 footer 行之后渲染）。
 - `packages/client/ui-workspace/src/client/{contract/slots.ts,WorkspacePicker.tsx,index.ts}`：声明并渲染 `conversation.hero.workspace.action`（`list`，owner = `{ busy, onClose, getAnchorRect? }`）。
 
-在 DSH 检出目录里：
+**补丁二：remote 工作区的两个标记槽位**
+
+镜像工作区要「列表里用图标、会话 chip 里写节点名」，而这两处都由上游渲染，所以带了第二份补丁：
+
+```
+patches/upstream-workspace-remote-badge.patch
+```
+
+- `packages/client/ui-workspace/src/client/**`：新增 `sidebar.workspaces.row.badge`（`list`，owner = `{ workspaceId }`），在工作区行标题之后渲染；`SessionTree` 透传该 seat。
+- `packages/client/ui-conversation/src/client/**`：新增 `conversation.hero.workspaceBadge`（`list`，owner = `{ workspaceId? }`），在 Hero 的 workspace chip 里、标签之后渲染。
+
+在 DSH 检出目录里（两个补丁都打，再重建这两个 client 包）：
 
 ```sh
 git apply /path/to/dsh-devspace/patches/upstream-workspace-action-slot.patch
+git apply /path/to/dsh-devspace/patches/upstream-workspace-remote-badge.patch
 pnpm --filter @deepseek-ai/dsh-client-ui-workspace run bundle
+pnpm --filter @deepseek-ai/dsh-client-ui-conversation run bundle
 pnpm run build:web
 ```
 
-没打补丁时插件其余部分照常工作，只是工作区菜单里不会出现「Add Remote…」（可以从设置页的节点管理 + 模型工具用）。
+没打补丁时插件其余部分照常工作：工作区菜单里不会出现「Add Remote…」，列表里没有节点图标、chip 里没有节点名（可以从设置页的节点管理 + 模型工具用）。
+
+## 远端标记与面板作用域
+
+镜像工作区的身份不写在标题里，而是三个由插件填的标记 seat：
+
+| 位置 | 显示 | slot |
+|---|---|---|
+| 左侧栏工作区行 | 节点图标（Windows / macOS / 通用），悬浮给出「节点 + 远端路径」 | `sidebar.workspaces.row.badge` |
+| New Session 的 workspace chip | 节点图标 + 节点名，例：`em800-dev  Windows 桌面机` | `conversation.hero.workspaceBadge` |
+| 已开会话的标题旁（`Standard mode` 左边） | 同一枚 chip：`Windows 桌面机` | `conversation.session.header.actions` |
+
+- chip 只属于 Hero（New Session）那一屏：会话一旦有内容，那个 seat 就不再渲染，所以镜像会话靠**标题旁的 chip** 报出节点名；本地会话两处都不显示。
+- 工作区标题只写目录本身（`test`、`yaoshikou`）；旧数据里 `[节点名] 目录` 形式的标题会在第一次读 `/state` 时自动改掉（只在标题仍带 `[...]` 前缀时改，手动改过的名字不动）。
+- 标记由插件自己的 `/state` 轮询驱动（一个共享索引，20s 一次，只在有标记挂载时轮询）。
+
+MCP / 技能 / 项目密钥三个面板（设置页 + 会话头部 inspector）里的「远端节点（DevSpace）」分区改成按当前工作区收敛：
+
+- 当前工作区是镜像 → 只显示该镜像对应的那**一个**节点，没有「显示全部节点」开关；
+- 当前工作区不是镜像 → **整块不显示**，Host 端直接返回空结果、**不发起任何远端命令**（`/remote?cwd=…` 不带 `all=1` 时先解析镜像，解析不到就返回空）；
+- 切换工作区时旧的远端结果不会覆盖新的（每个请求带序号，过期应答丢弃）。
+- 模型侧工具仍可显式传 `all: true` 列出全部节点（那是工具面，不是面板）。
+
+> host 半边（`index.js`：标题规则、标题迁移、`/remote` 提前返回）**需要重启 DSH** 才生效；client 半边刷新页面即可。
 
 ## 模型工具
 
@@ -87,6 +125,9 @@ pnpm run build:web
 | `settings.section` | `devspace` | 33 |
 | `conversation.hero.workspace.action` | `devspace-remote` | 10 |
 | `shell.overlay` | `devspace-remote-dialog` | 60 |
+| `sidebar.workspaces.row.badge` | `devspace-remote-row` | 10 |
+| `conversation.hero.workspaceBadge` | `devspace-remote-chip` | 10 |
+| `conversation.session.header.actions` | `devspace-remote-session` | 0 |
 
 ## 传输实现说明（两个真实限额）
 

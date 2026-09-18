@@ -698,6 +698,64 @@ export function apply(ctx, config = {}) {
     return join(root, node.name, ...parts)
   }
 
+  /** Last path segment of a node root, in either spelling. */
+  const baseName = (path) => {
+    const parts = String(path ?? '').replace(/[\\/]+$/, '').split(/[\\/]/).filter(part => part.length > 0)
+    const last = parts.length === 0 ? '' : parts[parts.length - 1]
+    return last === '.' || last === '~' ? '' : last
+  }
+
+  /**
+   * The local Workspace title one mirror gets: the directory itself, never the
+   * node name. Which node a mirror belongs to is what the sidebar badge and the
+   * Session's workspace chip state, so the title stays short.
+   */
+  const mirrorTitleFor = (node, rel) => {
+    if (rel.length > 0) return rel
+    const base = baseName(node?.root)
+    return base.length > 0 ? base : String(node?.name ?? '')
+  }
+
+  /** Set once the legacy `[node] ` titles have been repaired. */
+  let titlesMigrated = false
+
+  /**
+   * One-time repair of titles this plugin registered before the sidebar badge
+   * existed: those carry a `[node] ` prefix that now lives on the badge and on
+   * the Session's workspace chip. A title without that prefix is never touched,
+   * so a rename made in the sidebar survives.
+   * @param mirrors - the mirror listing being returned.
+   * @returns the same listing, with migrated titles.
+   */
+  const migrateMirrorTitles = async (mirrors) => {
+    if (titlesMigrated) return mirrors
+    const registry = ctx.get('workspaceRegistry')
+    if (registry === undefined) return mirrors
+    titlesMigrated = true
+    const { store } = await mirrorState()
+    const nodes = await readNodes(nodesFile, warn)
+    let changed = false
+    for (const mirror of mirrors) {
+      if (!/^\[[^\]]+\]/.test(String(mirror.title ?? ''))) continue
+      const entity = registry.get(mirror.workspaceId)
+      if (entity === undefined) continue
+      const node = nodes.find(candidate => candidate.name === mirror.node)
+      const next = mirrorTitleFor(node ?? { name: mirror.node, root: '' }, String(mirror.relative ?? ''))
+      try {
+        await entity.setTitle(next)
+      } catch (error) {
+        warn(`devspace: 重命名镜像工作区 "${mirror.workspaceId}" 失败：${messageOf(error)}`)
+        continue
+      }
+      const record = store.mirrors[mirror.workspaceId]
+      if (record !== null && typeof record === 'object') record.title = next
+      mirror.title = next
+      changed = true
+    }
+    if (changed) await writeMirrors(mirrorsFile, store)
+    return mirrors
+  }
+
   /** The mirror a tool call belongs to: explicit node, else the Session's cwd. */
   const targetForExec = async (exec, explicitNode) => {
     const { store } = await mirrorState()
@@ -716,17 +774,15 @@ export function apply(ctx, config = {}) {
   const listMirrors = async () => {
     const { store, root } = await mirrorState()
     const nodes = await readNodes(nodesFile, warn)
-    return {
-      mirrorRoot: root,
-      mirrors: Object.values(store.mirrors)
-        .filter(mirror => mirror !== null && typeof mirror === 'object')
-        .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
-        .map(mirror => ({
-          ...mirror,
-          nodeLabel: nodes.find(node => node.name === mirror.node)?.label ?? '',
-          exists: existsSync(String(mirror.localPath ?? '')),
-        })),
-    }
+    const mirrors = Object.values(store.mirrors)
+      .filter(mirror => mirror !== null && typeof mirror === 'object')
+      .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
+      .map(mirror => ({
+        ...mirror,
+        nodeLabel: nodes.find(node => node.name === mirror.node)?.label ?? '',
+        exists: existsSync(String(mirror.localPath ?? '')),
+      }))
+    return { mirrorRoot: root, mirrors: await migrateMirrorTitles(mirrors) }
   }
 
   /** List the directories directly under one node-relative path. */
@@ -1013,10 +1069,9 @@ export function apply(ctx, config = {}) {
     const remoteText = resultText(remote)
     if (remote.isError === true) throw new HttpError(502, remoteText || 'open_workspace 失败')
     const remoteMatch = /\b(ws_[A-Za-z0-9_-]{4,})\b/.exec(remoteText)
-    const label = node.label.length > 0 ? node.label : node.name
     const requested = typeof input?.title === 'string' && input.title.trim().length > 0
       ? input.title.trim()
-      : `[${label}] ${rel.length === 0 ? '.' : rel}`
+      : mirrorTitleFor(node, rel)
     const workspace = await registry.create(localPath, requested)
     const mirror = {
       workspaceId: String(workspace.id),

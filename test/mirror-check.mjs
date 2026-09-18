@@ -181,6 +181,9 @@ check('mirror AGENTS.md written', existsSync(join(mirrorPath, 'AGENTS.md')), nul
 check('remote workspace id recorded', open.json?.remoteWorkspaceId === 'ws_emulated01', open.json?.remoteWorkspaceId)
 check('state carries the mirror', state.json?.mirrors?.length === 1 && state.json.mirrors[0].localPath === open.json.localPath, state.json?.mirrors)
 check('mirror root surfaced', state.json?.mirrorRoot === mirrorRoot, state.json?.mirrorRoot)
+// The node is the sidebar badge's business, not the title's: a title that says
+// "[label] dir" is the legacy shape this plugin migrates away from.
+check('workspace title carries no node prefix', open.json?.title === 'test', open.json?.title)
 
 // 3. the target resolves from the Session cwd
 const target = await tools.get('devspace_target').execute({}, { agent: { session: { header: { id: 'session-1', cwd: mirrorPath } } } })

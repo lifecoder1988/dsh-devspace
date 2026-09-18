@@ -6,6 +6,13 @@
  * it is managed here rather than on the MCP page — this plugin owns the node
  * store, the mounts and the published skill.
  *
+ * Three marks carry "this Workspace mirrors a remote directory" out of the
+ * Settings page: the sidebar row wears the node's logo instead of putting the
+ * node name in the Workspace title, the Hero's workspace chip names the node next
+ * to the directory, and an open Session's header does the same — the chip is the
+ * Hero's own seat, so a Session with turns has none. All three read one shared
+ * mirror index.
+ *
  * No local mapping: nothing on this page binds a node directory to a local
  * workspace, and remote work happens only through `mcp__<node>__*` tools.
  */
@@ -127,6 +134,204 @@ window.__ModuleLoader__.load({
       disabled: { tone: 'quiet', label: '已停用' },
     }
 
+    /* ------------- remote marks: sidebar row + Hero workspace chip ------------ */
+
+    const BADGE_CSS = `
+.devs-mark { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--dsw-alias-label-tertiary); }
+.devs-mark-icon { display: inline-flex; align-items: center; flex: none; color: currentColor; }
+.devs-mark-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; }
+/* The Session header's mark reads as a chip, like the inspector chips beside it. */
+.devs-mark-head { flex: none; max-width: 190px; height: 24px; padding: 0 9px; box-sizing: border-box; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 999px; color: var(--dsw-alias-label-secondary); }
+.devs-mark-head .devs-mark-name { max-width: 140px; }
+`
+
+    /**
+     * Which local Workspace mirrors which node, by Workspace id. One shared poller
+     * feeds every mark: a row badge needs only "is this row remote", the chip also
+     * names the machine, and neither should cost a request per rendered row.
+     */
+    const mirrorIndex = {
+      byWorkspace: new Map(),
+      listeners: new Set(),
+      retainCount: 0,
+      timer: null,
+      loadedAt: 0,
+      inflight: null,
+      subscribe(listener) {
+        this.listeners.add(listener)
+        return () => { this.listeners.delete(listener) }
+      },
+      emit() { for (const listener of [...this.listeners]) listener() },
+      /** The mirror one local Workspace id belongs to, or null. */
+      get(workspaceId) { return this.byWorkspace.get(String(workspaceId ?? '')) ?? null },
+      /** The mirror one local directory lives in (itself or a subdirectory), or null. */
+      at(cwd) {
+        const path = String(cwd ?? '').replace(/\/+$/, '')
+        if (path.length === 0) return null
+        for (const mirror of this.byWorkspace.values()) {
+          const root = mirror.localPath.replace(/\/+$/, '')
+          if (root.length > 0 && (path === root || path.startsWith(`${root}/`))) return mirror
+        }
+        return null
+      },
+      /** Rebuild the index from one `/state` answer. */
+      setState(data) {
+        const nodes = new Map((data?.nodes ?? []).map(node => [String(node.name), node]))
+        const next = new Map()
+        for (const mirror of data?.mirrors ?? []) {
+          if (typeof mirror?.workspaceId !== 'string') continue
+          const node = nodes.get(String(mirror.node)) ?? {}
+          const label = String(mirror.nodeLabel ?? node.label ?? '')
+          next.set(mirror.workspaceId, {
+            node: String(mirror.node ?? ''),
+            label: label.length > 0 ? label : String(mirror.node ?? ''),
+            remotePath: String(mirror.remotePath ?? ''),
+            localPath: String(mirror.localPath ?? ''),
+            exists: mirror.exists !== false,
+          })
+        }
+        const changed = next.size !== this.byWorkspace.size || [...next].some(([id, value]) => {
+          const current = this.byWorkspace.get(id)
+          return current === undefined || current.node !== value.node || current.label !== value.label
+            || current.localPath !== value.localPath
+        })
+        this.byWorkspace = next
+        this.loadedAt = Date.now()
+        if (changed) this.emit()
+      },
+      refresh() {
+        if (this.inflight !== null) return this.inflight
+        this.inflight = call('/state')
+          .then(data => { this.setState(data) })
+          .catch(() => {})
+          .then(() => { this.inflight = null })
+        return this.inflight
+      },
+      /** Keep the poller alive while at least one mark is mounted. */
+      retain() {
+        this.retainCount += 1
+        if (this.retainCount === 1) {
+          void this.refresh()
+          this.timer = setInterval(() => { void this.refresh() }, 20000)
+        }
+        return () => {
+          this.retainCount -= 1
+          if (this.retainCount > 0) return
+          this.retainCount = 0
+          if (this.timer !== null) {
+            clearInterval(this.timer)
+            this.timer = null
+          }
+        }
+      },
+    }
+
+    /** Subscribe one mark to the mirror index. */
+    function useMirror(workspaceId) {
+      const id = String(workspaceId ?? '')
+      const [, bump] = React.useState(0)
+      React.useEffect(() => mirrorIndex.subscribe(() => bump(value => value + 1)), [])
+      React.useEffect(() => mirrorIndex.retain(), [])
+      return id.length === 0 ? null : mirrorIndex.get(id)
+    }
+
+    /** The same subscription, for a mark that knows a directory instead of an id. */
+    function useMirrorAt(cwd) {
+      const path = String(cwd ?? '')
+      const [, bump] = React.useState(0)
+      React.useEffect(() => mirrorIndex.subscribe(() => bump(value => value + 1)), [])
+      React.useEffect(() => mirrorIndex.retain(), [])
+      return path.length === 0 ? null : mirrorIndex.at(path)
+    }
+
+    /**
+     * The node logo one mark shows: the node's own name decides and a name that
+     * says nothing falls back to the neutral grid. Same art as the sibling node
+     * panels keep, so one machine reads the same everywhere.
+     */
+    const NODE_GLYPHS = {
+      win: [['path', { d: 'M2 3.4 7.3 2.7 7.3 7.6 2 7.6 Z M8.3 2.6 14 1.8 14 7.6 8.3 7.6 Z M2 8.7 7.3 8.7 7.3 13.6 2 12.9 Z M8.3 8.7 14 8.7 14 14.5 8.3 13.7 Z', filled: true }]],
+      mac: [
+        ['path', { d: 'M11.2 8.4 C11.2 6.8 12.5 6.1 12.6 6 C11.8 4.9 10.6 4.7 10.2 4.7 9.1 4.6 8.2 5.3 7.6 5.3 7 5.3 6.3 4.7 5.4 4.7 4.3 4.7 3.2 5.4 2.6 6.4 1.4 8.5 2.3 11.6 3.5 13.3 4.1 14.1 4.8 15 5.7 14.9 6.6 14.9 6.9 14.3 8 14.3 9.1 14.3 9.4 14.9 10.3 14.9 11.3 14.9 11.9 14.1 12.5 13.3 13.2 12.4 13.4 11.5 13.5 11.4 13.5 11.4 11.2 10.5 11.2 8.4 Z', filled: true }],
+        ['path', { d: 'M9.6 3.7 C10.1 3.1 10.4 2.3 10.3 1.5 9.6 1.5 8.7 2 8.2 2.6 7.8 3.1 7.4 4 7.5 4.8 8.3 4.9 9.1 4.4 9.6 3.7 Z', filled: true }],
+      ],
+      grid: [
+        ['rect', { x: 2.3, y: 2.3, width: 4.7, height: 4.7, rx: 1.3 }],
+        ['rect', { x: 9, y: 2.3, width: 4.7, height: 4.7, rx: 1.3 }],
+        ['rect', { x: 2.3, y: 9, width: 4.7, height: 4.7, rx: 1.3 }],
+        ['rect', { x: 9, y: 9, width: 4.7, height: 4.7, rx: 1.3 }],
+      ],
+    }
+
+    /** One 16×16 node glyph, coloured by `currentColor`. */
+    function nodeGlyph(mirror, size) {
+      const named = `${mirror.node} ${mirror.label}`.toLowerCase()
+      const id = /win|windows|powershell/.test(named) ? 'win' : /mac|darwin|apple|osx/.test(named) ? 'mac' : 'grid'
+      return h('svg', { viewBox: '0 0 16 16', width: size, height: size, 'aria-hidden': 'true', focusable: 'false' },
+        NODE_GLYPHS[id].map(([tag, attrs], index) => {
+          const { filled, ...rest } = attrs
+          return h(tag, {
+            key: index,
+            ...rest,
+            ...(filled === true
+              ? { fill: 'currentColor', stroke: 'none' }
+              : { fill: 'none', stroke: 'currentColor', strokeWidth: 1.2 }),
+          })
+        }))
+    }
+
+    /** What the node is, for the hover tooltip both marks carry. */
+    const markTitle = mirror => `远端节点 ${mirror.label}（${mirror.node}）· ${mirror.remotePath}`
+
+    /**
+     * The sidebar row's mark: the node logo alone, because the directory title is
+     * the row's text and the node is what the icon adds.
+     */
+    function RemoteRowBadge(props) {
+      const mirror = useMirror(props?.workspaceId)
+      if (mirror === null) return null
+      return h('span', { className: 'devs-mark', 'data-devs-remote': mirror.node, title: markTitle(mirror) },
+        h('style', null, BADGE_CSS),
+        h('span', { className: 'devs-mark-icon' }, nodeGlyph(mirror, 14)),
+      )
+    }
+
+    /**
+     * The Hero workspace chip's mark: the same logo plus the node's own name, so
+     * the chip says both which directory and which machine the Session runs in.
+     */
+    function RemoteChipBadge(props) {
+      const mirror = useMirror(props?.workspaceId)
+      if (mirror === null) return null
+      return h('span', { className: 'devs-mark', 'data-devs-remote': mirror.node, title: markTitle(mirror) },
+        h('style', null, BADGE_CSS),
+        h('span', { className: 'devs-mark-icon' }, nodeGlyph(mirror, 14)),
+        h('span', { className: 'devs-mark-name' }, mirror.label),
+      )
+    }
+
+    /**
+     * The open Session's own mark, for the seat the Hero chip cannot reach: once a
+     * Session has turns there is no workspace chip any more, so the header names
+     * the node instead. A Session in a local directory renders nothing.
+     * @param props - the header seat's standard Session props (`sessionId`, `useSessions`).
+     */
+    function RemoteSessionBadge(props) {
+      const sessionId = props?.sessionId
+      const cwd = props.useSessions(snapshot => (sessionId === undefined ? undefined : snapshot.byId[sessionId]?.cwd))
+      const mirror = useMirrorAt(cwd)
+      if (mirror === null) return null
+      return h('span', {
+        className: 'devs-mark devs-mark-head',
+        'data-devs-remote': mirror.node,
+        title: markTitle(mirror),
+      },
+        h('style', null, BADGE_CSS),
+        h('span', { className: 'devs-mark-icon' }, nodeGlyph(mirror, 14)),
+        h('span', { className: 'devs-mark-name' }, mirror.label),
+      )
+    }
+
     function emptyDraft() {
       return { name: '', label: '', url: 'http://', root: '', headersText: '', notes: '', toolCallTimeoutMs: 120000, failOnStartupError: true, enabled: true, mode: 'create' }
     }
@@ -229,6 +434,7 @@ window.__ModuleLoader__.load({
         if (!quiet) setState(previous => ({ ...previous, loading: true, error: null }))
         try {
           const data = await call('/state')
+          mirrorIndex.setState(data)
           setState({ loading: false, error: null, data })
           return data
         } catch (error) {
@@ -943,6 +1149,31 @@ window.__ModuleLoader__.load({
           id: 'devspace-remote-dialog',
           order: 60,
         }, RemoteDialogHost))
+
+        // Marks that say "this Workspace mirrors a remote directory" where the
+        // Workspace itself is shown: the sidebar row wears the node logo (the
+        // title stays the plain directory name), and the Hero's workspace chip
+        // names the node beside it. Both seats come from upstream ui-workspace /
+        // ui-conversation, so a harness without them simply shows neither.
+        ctx.slots.inject('sidebar.workspaces.row.badge', () => ctx.slots.register({
+          name: 'sidebar.workspaces.row.badge',
+          id: 'devspace-remote-row',
+          order: 10,
+        }, RemoteRowBadge))
+
+        ctx.slots.inject('conversation.hero.workspaceBadge', () => ctx.slots.register({
+          name: 'conversation.hero.workspaceBadge',
+          id: 'devspace-remote-chip',
+          order: 10,
+        }, RemoteChipBadge))
+
+        // An open mirror Session has no workspace chip (that seat is the Hero's),
+        // so its header carries the same mark next to the title.
+        ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+          name: 'conversation.session.header.actions',
+          id: 'devspace-remote-session',
+          order: 0,
+        }, RemoteSessionBadge))
 
         // Read-only self-check over the harness's own Cordis Inspect channel.
         // Reactive injection, not a one-shot `ctx.get`: a plugin's apply may run
