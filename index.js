@@ -1027,12 +1027,16 @@ export function apply(ctx, config = {}) {
       ? tools.map(name => `\`${name}\``).join(' / ')
       : '`read` / `write` / `edit` / `bash`'
     const example = dialectFor(node) === 'win' ? `${remoteAbsolute}\\src\\x.ts` : `${remoteAbsolute}/src/x.ts`
+    const remoteReadme = dialectFor(node) === 'win' ? `${remoteAbsolute}\\AGENTS.md` : `${remoteAbsolute}/AGENTS.md`
     const body = [
       `# 远端镜像工作区（DevSpace · ${label}）`,
       '',
       `这个本地目录是「${node.name}」节点上 \`${remoteAbsolute}\` 的镜像工作区，**不是**远端项目的副本：`,
       '',
       `- 远端项目本身仍在节点 \`${node.name}\` 上（工具前缀 \`mcp__${node.name}__*\`：${toolLine}）。读写远端代码、跑远端命令一律用这些工具，路径写远端形式（如 \`${example}\`）。`,
+      `- **说「远端」= 远端项目**：本会话里「远端」指的是节点上那个远端项目（\`${remoteAbsolute}\`），不是这个本地镜像目录。`,
+      `- **默认先读远端的 \`AGENTS.md\`**：动手前先用 \`mcp__${node.name}__read\` 读远端的 \`${remoteReadme}\`（相对远端目录就写 \`AGENTS.md\`）；远端若有 \`CLAUDE.md\` 等更多指令文件也一并读。本地这份只讲镜像怎么用，不能替代它。`,
+      '- **默认执行环境是远端**：跑命令、装依赖、构建、测试、读写项目文件都走远端工具；本地只用于下载数据、暂存待上传产物、写本地分析脚本。',
       '- 这个本地目录用来放：下载下来的数据、待上传的产物、本地分析/处理脚本。本地读写用普通本地工具即可。',
       '- 开工前先调 `devspace_target` 确认本会话的远端目标（节点 + 远端目录 + workspace_id），不要假设两边内容一致。',
       '- 传文件：`devspace_pull`（远端 → 本地镜像）与 `devspace_push`（本地 → 远端），二进制安全，按块传输。',
