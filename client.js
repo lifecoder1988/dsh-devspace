@@ -21,10 +21,31 @@ window.__ModuleLoader__.load({
   id: '@local/dsh-devspace',
   factory(require) {
     const React = require('react')
+    const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
     const {
-      Button, Input, Checkbox, Tag, IconProjectAddOutline16, Modal,
-      IconCheckOutline16, IconChevronRightOutline14, IconEditOutline16, IconFolderClose16, IconPlusOutline16,
-    } = require('@deepseek-ai/dsh-client-ui-primitives')
+      Button,
+      Input,
+      Checkbox,
+      Tag,
+      Modal,
+    } = primitives
+
+    // DSH 0.2.1 renamed the fixed-size icon exports (`IconFooOutline16`,
+    // `IconFooOutline14`) to weight-suffixed ones (`IconFooOutlineRegular`).
+    // Resolve either name so this browser half keeps rendering across DSH
+    // releases; an unknown icon degrades to no glyph instead of throwing and
+    // blanking the slot entry (a plain-JS client has no type check).
+    function EmptyIcon() { return null }
+    function icon(base) {
+      return primitives[base + 'Regular'] || primitives[base + 'Medium']
+        || primitives[base + '16'] || primitives[base + '14'] || EmptyIcon
+    }
+    const IconProjectAddOutline16 = icon('IconProjectAddOutline')
+    const IconCheckOutline16 = icon('IconCheckOutline')
+    const IconChevronRightOutline14 = icon('IconChevronRightOutline')
+    const IconEditOutline16 = icon('IconEditOutline')
+    const IconFolderClose16 = icon('IconFolderClose')
+    const IconPlusOutline16 = icon('IconPlusOutline')
     // A body-level portal: `position: fixed` inside the frame-wide overlay layer
     // degrades to that layer's own coordinate space when any ancestor carries a
     // transform/filter, which made the panel look like page content.
